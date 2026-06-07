@@ -42,7 +42,6 @@ htmlcov/
 .nox/
 .coverage
 .coverage.*
-.cache
 nosetests.xml
 coverage.xml
 *.cover
@@ -57,6 +56,7 @@ cover/
 
 # Django stuff:
 *.log
+logs/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -136,6 +136,7 @@ celerybeat.pid
 
 # Environments
 .env
+!.env.example
 .envrc
 .venv
 env/
@@ -201,7 +202,75 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Antigravity runtime
+.agy/cache/
+.agy/tmp/
+.agy/sessions/
+.claude/cache/
+.claude/tmp/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Web frontend
+frontend/web/.next/
+frontend/web/node_modules/
+frontend/web/.turbo/
+frontend/web/.env.local
+frontend/web/.env.production
+
+# Streamlit
+frontend/streamlit/.streamlit/
+
+# Mobile frontend
+frontend/mobile/node_modules/
+
+# Frontend builds
+frontend/**/dist/
+frontend/**/build/
+frontend/**/.cache/
+
+# Generated exports only
+exports/generated/
+exports/temp/
+
+# Docker volumes
+volumes/
+data/
+postgres_data/
+redis_data/
+
+# Local AI / cache
+.cache/
+
+# Mac
+.AppleDouble
+.LSOverride
+
+# Windows
+Desktop.ini
+
+# Temporary
+tmp/
+temp/
+
+# OS temp
+*.tmp
+
+# uv
+.uv/
+
+*.egg-info/
+pip-wheel-metadata/
+
+# Runtime
+*.pid
+*.db-shm
+*.db-wal
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
