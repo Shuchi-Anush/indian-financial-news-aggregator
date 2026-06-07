@@ -274,3 +274,10 @@ pip-wheel-metadata/
 *.db
 *.sqlite
 *.sqlite3
+
+# Future modules (not initialized yet)
+frontend/*
+!frontend/.gitkeep
+
+infra/*
+!infra/.gitkeep
