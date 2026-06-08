@@ -1,86 +1,115 @@
-# Walkthrough: Repository Governance & Documentation Layer
+# Walkthrough: Phase 1 — Backend Core Runtime Foundation
 
-## What Was Done
+## Files Implemented
 
-Populated the entire documentation and AI context layer across **38 files** (4 redundant files removed, 0 placeholder files remain). Every file contains actionable engineering content.
+| File | Lines | Responsibility |
+|------|-------|---------------|
+| [core/__init__.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/__init__.py) | 1 | Package marker |
+| [core/config.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/config.py) | 66 | Typed settings via pydantic-settings, cached loader |
+| [core/logging.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/logging.py) | 72 | Structlog setup — dev console / prod JSON modes |
+| [core/exceptions.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/exceptions.py) | 121 | Domain exception hierarchy + FastAPI error handlers |
+| [core/middleware.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/middleware.py) | 119 | Request ID, request logging, CORS |
+| [core/startup.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/startup.py) | 47 | Lifespan context manager (startup/shutdown) |
+| [db/base.py](file:///d:/indian-financial-news-aggregator/backend/src/app/db/base.py) | 50 | Declarative base + TimestampMixin |
+| [db/session.py](file:///d:/indian-financial-news-aggregator/backend/src/app/db/session.py) | 78 | Async engine lifecycle + session DI |
+| [main.py](file:///d:/indian-financial-news-aggregator/backend/src/app/main.py) | 39 | Composition root — wires everything |
 
-## Structural Decisions
-
-### Files Removed (redundant)
-- `docs/architecture/backend_architecture.md` — merged into `system_architecture.md` (single backend)
-- `docs/architecture/backend_implementation_plan.md` — duplicate of `implementation_plan.md`
-- `docs/api/endpoint_reference.md` — merged into `api_contracts.md`
-- `.claude/prompts/code_review_prompt.md` — duplicate naming of `code_review.md`
-- `.claude/prompts/architecture_review_prompt.md` — duplicate naming of `architecture_review.md`
-- `docs/.gitkeep` — no longer needed (directory has real files)
-
-### Root Files Redirected
-- `ARCHITECTURE.md` → pointer to `docs/architecture/`
-- `ROADMAP.md` → pointer to `docs/context/roadmap.md`
+**Also modified:** [Dockerfile](file:///d:/indian-financial-news-aggregator/backend/Dockerfile) — changed CMD to use `--app-dir src` for correct import resolution.
 
 ---
 
-## File Manifest
+## Key Design Decisions
 
-### `.claude/` — AI Operating Context (12 files)
+### Import Path: `app.*` with `--app-dir src`
+The project uses a `src/` layout. Instead of `from src.app.core.config import ...`, all imports use `from app.core.config import ...` — the standard convention for src-layout Python projects. The Dockerfile and uvicorn invocation use `--app-dir src` to set the correct root.
 
-| File | Purpose |
-|------|---------|
-| [repository_map.md](file:///d:/indian-financial-news-aggregator/.claude/repository_map.md) | Directory tree, module ownership, data flow, dependency direction |
-| [engineering_principles.md](file:///d:/indian-financial-news-aggregator/.claude/engineering_principles.md) | 10 core principles (async-first, thin routes, type everything, etc.) |
-| [architecture_rules.md](file:///d:/indian-financial-news-aggregator/.claude/architecture_rules.md) | 15 hard constraints (layer boundaries, no logic in routes, etc.) |
-| [architecture.md](file:///d:/indian-financial-news-aggregator/.claude/architecture.md) | System context diagram, layer table, tech choices |
-| [coding_standards.md](file:///d:/indian-financial-news-aggregator/.claude/coding_standards.md) | Naming, imports, async patterns, logging, error handling with examples |
-| [backend_conventions.md](file:///d:/indian-financial-news-aggregator/.claude/backend_conventions.md) | Route/service/collector/DI patterns with code templates |
-| [ai_operating_guidelines.md](file:///d:/indian-financial-news-aggregator/.claude/ai_operating_guidelines.md) | AI do/don't rules, pre-implementation checklist |
-| [repository_constraints.md](file:///d:/indian-financial-news-aggregator/.claude/repository_constraints.md) | Allowed/not-allowed technology and scope tables |
-| [prompts/implementation_prompt.md](file:///d:/indian-financial-news-aggregator/.claude/prompts/implementation_prompt.md) | Reusable prompt for implementation tasks |
-| [prompts/code_review.md](file:///d:/indian-financial-news-aggregator/.claude/prompts/code_review.md) | Reusable prompt for code review |
-| [prompts/architecture_review.md](file:///d:/indian-financial-news-aggregator/.claude/prompts/architecture_review.md) | Reusable prompt for architecture review |
-| [prompts/scalability_review.md](file:///d:/indian-financial-news-aggregator/.claude/prompts/scalability_review.md) | Reusable prompt for scalability review |
+### Logging Before Everything
+`setup_logging()` is called at module-level in `main.py` before any other imports. This ensures structlog is configured before the first log event (including startup logs from the lifespan handler).
 
-### `.agy/` — Workspace Operational Context (10 files)
+### Module-Level DB State
+`db/session.py` uses module-level `_engine` and `_session_factory` variables initialized once during startup via `init_engine()`. This avoids DI frameworks or global state managers while remaining testable (can call `init_engine()` with different configs in tests).
 
-| File | Purpose |
-|------|---------|
-| [workspace_context.md](file:///d:/indian-financial-news-aggregator/.agy/workspace_context.md) | Project summary, phase, stack table, repo state |
-| [active_sprint.md](file:///d:/indian-financial-news-aggregator/.agy/active_sprint.md) | Full sprint backlog with checkboxes, implementation order |
-| [current_priorities.md](file:///d:/indian-financial-news-aggregator/.agy/current_priorities.md) | P0/P1/P2 priority ranking with "not now" list |
-| [current_tasks.md](file:///d:/indian-financial-news-aggregator/.agy/current_tasks.md) | Immediate next actions and recently completed |
-| [anti_patterns.md](file:///d:/indian-financial-news-aggregator/.agy/anti_patterns.md) | BAD/GOOD code comparisons for common mistakes |
-| [commands.md](file:///d:/indian-financial-news-aggregator/.agy/commands.md) | All dev, Docker, DB, test, lint, API curl commands |
-| [templates/model_template.md](file:///d:/indian-financial-news-aggregator/.agy/templates/model_template.md) | SQLAlchemy ORM model boilerplate + checklist |
-| [templates/service_template.md](file:///d:/indian-financial-news-aggregator/.agy/templates/service_template.md) | Service class boilerplate + DI pattern + checklist |
-| [templates/api_route_template.md](file:///d:/indian-financial-news-aggregator/.agy/templates/api_route_template.md) | Route handler boilerplate + registration + checklist |
-| [templates/collector_template.md](file:///d:/indian-financial-news-aggregator/.agy/templates/collector_template.md) | Collector class boilerplate + rules + checklist |
+### Exception Hierarchy
+```
+AppError (500, internal_error)
+├── NotFoundError (404, not_found)
+├── CollectorError (502, collector_error)
+├── NormalizationError (422, normalization_error)
+├── DuplicateArticleError (409, duplicate_article)
+└── ExportError (500, export_error)
+```
+Each exception carries `status_code`, `error_code`, `message`, and optional `details`. The FastAPI handler converts them into consistent `{error, message, details?}` JSON.
 
-### `docs/` — Engineering Documentation (16 files)
+### Middleware Order (LIFO)
+Registered in this order (LIFO means first-registered = outermost):
+1. `RequestIdMiddleware` — generates UUID, binds to structlog contextvars
+2. `RequestLoggingMiddleware` — logs method/path/status/duration (includes request_id from contextvars)
+3. `CORSMiddleware` — permissive in dev, locked down in prod
 
-| File | Purpose |
-|------|---------|
-| [architecture/system_architecture.md](file:///d:/indian-financial-news-aggregator/docs/architecture/system_architecture.md) | Component diagram, request/pipeline flow, tech stack |
-| [architecture/pipeline_flow.md](file:///d:/indian-financial-news-aggregator/docs/architecture/pipeline_flow.md) | Stage-by-stage pipeline, error handling table, concurrency model |
-| [architecture/db_design.md](file:///d:/indian-financial-news-aggregator/docs/architecture/db_design.md) | Table schemas, indexes, mixins, query patterns |
-| [architecture/collector_strategy.md](file:///d:/indian-financial-news-aggregator/docs/architecture/collector_strategy.md) | RSS sources, field mapping, known quirks per source |
-| [architecture/deployment_architecture.md](file:///d:/indian-financial-news-aggregator/docs/architecture/deployment_architecture.md) | Docker Compose topology, container specs, non-goals |
-| [architecture/implementation_plan.md](file:///d:/indian-financial-news-aggregator/docs/architecture/implementation_plan.md) | Phased implementation plan (pre-existing, preserved) |
-| [api/api_contracts.md](file:///d:/indian-financial-news-aggregator/docs/api/api_contracts.md) | All endpoints, request/response schemas, pagination |
-| [context/project_scope.md](file:///d:/indian-financial-news-aggregator/docs/context/project_scope.md) | What the project is, scale assumptions, current phase |
-| [context/non_goals.md](file:///d:/indian-financial-news-aggregator/docs/context/non_goals.md) | Explicit non-goals (architecture, feature, process) |
-| [context/roadmap.md](file:///d:/indian-financial-news-aggregator/docs/context/roadmap.md) | 4-phase roadmap with Phase 1 exit criteria |
-| [decisions/adr_001_manual_pipeline.md](file:///d:/indian-financial-news-aggregator/docs/decisions/adr_001_manual_pipeline.md) | Decision: manual trigger over scheduler |
-| [decisions/adr_002_create_all_initially.md](file:///d:/indian-financial-news-aggregator/docs/decisions/adr_002_create_all_initially.md) | Decision: create_all() over Alembic in dev |
-| [decisions/adr_003_manual_feed_seed.md](file:///d:/indian-financial-news-aggregator/docs/decisions/adr_003_manual_feed_seed.md) | Decision: script-based seeding over auto-seed |
-| [operations/local_development.md](file:///d:/indian-financial-news-aggregator/docs/operations/local_development.md) | Step-by-step local dev setup + troubleshooting |
-| [operations/docker_workflow.md](file:///d:/indian-financial-news-aggregator/docs/operations/docker_workflow.md) | Docker command reference |
-| [operations/deployment_checklist.md](file:///d:/indian-financial-news-aggregator/docs/operations/deployment_checklist.md) | Deployment checklist + rollback procedure |
+---
 
-### Root Files (5 files)
+## Verification Results
 
-| File | Purpose |
-|------|---------|
-| [README.md](file:///d:/indian-financial-news-aggregator/README.md) | Project overview, quick start, API summary, docs index |
-| [ARCHITECTURE.md](file:///d:/indian-financial-news-aggregator/ARCHITECTURE.md) | Pointer to docs/architecture/ |
-| [ROADMAP.md](file:///d:/indian-financial-news-aggregator/ROADMAP.md) | Pointer to docs/context/roadmap.md |
-| [CONTRIBUTING.md](file:///d:/indian-financial-news-aggregator/CONTRIBUTING.md) | Dev setup, standards, pre-submit checklist, contribution patterns |
-| [backend/README.md](file:///d:/indian-financial-news-aggregator/backend/README.md) | Module structure, key commands |
+### Import Check (no circular deps)
+```
+[OK] logging
+[OK] exceptions
+[OK] middleware
+[OK] startup
+[OK] db/base
+[OK] db/session
+[OK] ALL IMPORTS PASSED — no circular dependencies
+```
+
+### Server Startup
+```
+application_startup            app_env=development backend_port=8000 postgres_host=localhost
+database_engine_initialized
+Application startup complete.
+Uvicorn running on http://127.0.0.1:8000
+```
+
+### Request Tracing
+```
+request_completed  method=GET path=/health       status=200 duration_ms=12.06 request_id=1b28d4bb-...
+request_completed  method=GET path=/openapi.json  status=200 duration_ms=21.05 request_id=2e068e44-...
+request_completed  method=GET path=/nonexistent   status=404 duration_ms=0.2   request_id=cfaa9b40-...
+```
+
+### Health Check Response
+```json
+{"status": "ok"}
+```
+
+---
+
+## Run Commands
+
+```bash
+# From backend/ directory:
+
+# Install dependencies
+uv sync
+
+# Start server (local dev)
+uv run uvicorn app.main:app --app-dir src --reload --host 127.0.0.1 --port 8000
+
+# Verify
+curl http://127.0.0.1:8000/health
+# → {"status":"ok"}
+
+# Docker (full stack)
+docker compose up --build
+```
+
+---
+
+## Extension Points for Next Phase
+
+| Next Step | Where |
+|-----------|-------|
+| Add ORM models (Article, FeedSource) | `models/article.py`, `models/feed_source.py` |
+| Add Pydantic schemas | `schemas/article.py`, `schemas/feed.py` |
+| Add `create_all()` to lifespan | `core/startup.py` (after `init_engine()`) |
+| Add API routes | `api/routes/` → mount in `main.py` |
+| Add services | `services/` → use `get_db()` via DI |

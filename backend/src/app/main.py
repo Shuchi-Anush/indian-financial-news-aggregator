@@ -1,11 +1,39 @@
-from fastapi import FastAPI
+"""Application entry point — composition root.
+
+Initializes logging, creates the FastAPI app, and wires together
+middleware, exception handlers, and the lifespan manager.
+
+Run with::
+
+    uv run uvicorn app.main:app --app-dir src --reload
+"""
+
+from app.core.logging import setup_logging
+
+# Configure structured logging before anything else
+setup_logging()
+
+from fastapi import FastAPI  # noqa: E402
+
+from app.core.exceptions import register_exception_handlers  # noqa: E402
+from app.core.middleware import register_middleware  # noqa: E402
+from app.core.startup import lifespan  # noqa: E402
 
 app = FastAPI(
     title="Indian Financial News Aggregator",
     version="0.1.0",
+    description="Collects, normalizes, deduplicates, and serves Indian financial news.",
+    lifespan=lifespan,
 )
 
+# Wire middleware (request ID, logging, CORS)
+register_middleware(app)
 
-@app.get("/health")
-async def health_check():
+# Wire exception handlers (domain errors → JSON responses)
+register_exception_handlers(app)
+
+
+@app.get("/health", tags=["system"])
+async def health_check() -> dict[str, str]:
+    """Liveness probe — returns 200 if the process is running."""
     return {"status": "ok"}
