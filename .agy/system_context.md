@@ -165,3 +165,35 @@ Upcoming:
 * normalization pipeline
 * deduplication engine
 * export pipeline
+
+# Pipeline Philosophy
+
+The ingestion pipeline follows a staged architecture:
+
+raw ingestion
+→ normalization
+→ deduplication
+→ persistence
+→ export/API serving
+
+Each stage owns a single responsibility.
+
+# Persistence Semantics
+
+Database persistence must be:
+
+* idempotent
+* restart-safe
+* duplicate-safe
+* transactionally isolated
+* async-safe
+
+Prefer database-enforced correctness over in-memory assumptions.
+
+Collectors must never:
+
+* compute dedup hashes
+* canonicalize articles
+* enrich content
+* classify articles
+* write to the database
