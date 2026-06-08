@@ -4,17 +4,22 @@ This file tracks the immediate next actions. Updated as work progresses.
 
 ## Next Up
 
-- [ ] Implement `models/article.py` — Article ORM model
-- [ ] Implement `models/feed_source.py` — FeedSource ORM model
-- [ ] Implement `schemas/article.py` — ArticleCreate, ArticleRead, ArticleFilter
-- [ ] Implement `schemas/feed.py` — FeedSourceCreate, FeedSourceRead
-- [ ] Add `create_all()` to startup lifespan (after models exist)
+_Phase 2 complete. Next phase TBD._
 
 ## Blocked
 
 _Nothing currently blocked._
 
 ## Recently Completed
+
+- [x] Implement `models/feed_source.py` — FeedSource ORM model
+- [x] Implement `models/article.py` — Article ORM model
+- [x] Implement `schemas/article.py` — ArticleCreate, ArticleRead, ArticleFilter
+- [x] Implement `schemas/feed.py` — FeedSourceCreate, FeedSourceRead, FeedSourceUpdate
+- [x] Add `models/__init__.py` re-exports for metadata registration
+- [x] Add `schemas/__init__.py` re-exports
+- [x] Add `create_all()` to startup lifespan
+- [x] Relationships: FeedSource ↔ Article (back_populates)
 
 - [x] Repository skeleton created
 - [x] Dependencies declared in pyproject.toml
