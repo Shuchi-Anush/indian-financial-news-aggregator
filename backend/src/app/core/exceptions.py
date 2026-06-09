@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 # Base exception
 # ---------------------------------------------------------------------------
 
+
 class AppError(Exception):
     """Base exception for all application domain errors.
 
@@ -39,6 +40,7 @@ class AppError(Exception):
 # ---------------------------------------------------------------------------
 # Domain-specific exceptions
 # ---------------------------------------------------------------------------
+
 
 class NotFoundError(AppError):
     """Requested entity does not exist."""
@@ -96,6 +98,7 @@ class ExportError(AppError):
 # ---------------------------------------------------------------------------
 # FastAPI exception handlers
 # ---------------------------------------------------------------------------
+
 
 def _build_error_response(exc: AppError) -> JSONResponse:
     """Convert a domain exception into a consistent JSON response."""

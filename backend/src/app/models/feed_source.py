@@ -4,13 +4,19 @@ Each FeedSource defines a single collection target (RSS feed URL, API endpoint, 
 Articles reference back to their originating feed via a foreign key.
 """
 
+from __future__ import annotations
+
 import enum
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.article import Article
 
 
 class SourceType(enum.Enum):

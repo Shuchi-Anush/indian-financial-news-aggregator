@@ -216,7 +216,7 @@ indian-financial-news-aggregator/
 ### 1. Clone
 
 ```bash
-git clone https://github.com/<your-username>/indian-financial-news-aggregator.git
+git clone https://github.com/Shuchi-Anush/indian-financial-news-aggregator.git
 cd indian-financial-news-aggregator
 ```
 

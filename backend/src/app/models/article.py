@@ -7,14 +7,20 @@ deduplicated by the pipeline. Designed for:
 - Future ML classification (nullable ``category`` / ``sentiment`` fields)
 """
 
+from __future__ import annotations
+
 import enum
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.feed_source import FeedSource
 
 
 class ArticleCategory(enum.Enum):

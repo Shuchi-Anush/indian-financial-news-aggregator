@@ -29,6 +29,7 @@ REQUEST_ID_HEADER = "X-Request-ID"
 # Request ID middleware
 # ---------------------------------------------------------------------------
 
+
 class RequestIdMiddleware(BaseHTTPMiddleware):
     """Attach a unique request ID to every request.
 
@@ -38,9 +39,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     - Echoes it back in the response headers for client-side correlation.
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         request_id = request.headers.get(REQUEST_ID_HEADER, str(uuid.uuid4()))
 
         # Bind request_id into structlog context for this request
@@ -59,12 +58,11 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 # Request logging middleware
 # ---------------------------------------------------------------------------
 
+
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log every HTTP request with method, path, status, and duration."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         start = time.perf_counter()
 
         response = await call_next(request)
@@ -83,6 +81,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 # CORS configuration
 # ---------------------------------------------------------------------------
+
 
 def configure_cors(app: FastAPI) -> None:
     """Add CORS middleware — permissive in dev, restricted in production."""
@@ -105,6 +104,7 @@ def configure_cors(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 # Registration helper
 # ---------------------------------------------------------------------------
+
 
 def register_middleware(app: FastAPI) -> None:
     """Register all middleware on the FastAPI application.

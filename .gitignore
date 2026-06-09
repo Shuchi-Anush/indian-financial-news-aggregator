@@ -281,3 +281,7 @@ frontend/*
 
 infra/*
 !infra/.gitkeep
+
+secrets
+passwords
+tokens

@@ -58,7 +58,8 @@ async def _install_updated_at_triggers(
     Idempotent: safe to run on every startup (CREATE OR REPLACE / DROP IF EXISTS).
     """
     # Shared trigger function — one per database
-    await conn.execute(text("""
+    await conn.execute(
+        text("""
         CREATE OR REPLACE FUNCTION update_updated_at_column()
         RETURNS TRIGGER AS $$
         BEGIN
@@ -66,22 +67,23 @@ async def _install_updated_at_triggers(
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
-    """))
+    """)
+    )
 
     # Apply trigger to each table with an updated_at column
     for table in metadata.tables.values():
         if "updated_at" not in table.columns:
             continue
         trigger_name = f"trg_{table.name}_updated_at"
-        await conn.execute(text(
-            f"DROP TRIGGER IF EXISTS {trigger_name} ON {table.name}"
-        ))
-        await conn.execute(text(f"""
+        await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name} ON {table.name}"))
+        await conn.execute(
+            text(f"""
             CREATE TRIGGER {trigger_name}
                 BEFORE UPDATE ON {table.name}
                 FOR EACH ROW
                 EXECUTE FUNCTION update_updated_at_column()
-        """))
+        """)
+        )
 
     log.info("updated_at_triggers_installed")
 
