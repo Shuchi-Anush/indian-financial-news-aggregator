@@ -36,6 +36,7 @@ class FeedSource(TimestampMixin, Base):
         slug: URL-safe unique identifier used in API paths and dedup keys.
         url: The feed URL or API endpoint to collect from.
         source_type: Enum indicating collection strategy (RSS, API, scraper).
+        timezone_hint: Timezone name to assist normalizer timestamp parsing.
         is_active: Whether the pipeline should collect from this source.
         description: Optional notes about the feed.
         articles: Relationship to collected articles (lazy-loaded by default).
@@ -51,6 +52,7 @@ class FeedSource(TimestampMixin, Base):
     slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     url: Mapped[str] = mapped_column(String(2048), unique=True, nullable=False)
     source_type: Mapped[SourceType] = mapped_column(nullable=False, default=SourceType.RSS)
+    timezone_hint: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 

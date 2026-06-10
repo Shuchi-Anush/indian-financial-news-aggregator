@@ -7,10 +7,14 @@ to support exact duplicate detection.
 import hashlib
 
 
-def compute_content_hash(title: str, url: str) -> str:
+HASH_VERSION = "1"
+
+
+def compute_content_hash(title: str, summary: str | None) -> str:
     """
-    Compute a stable SHA-256 hash for an article based on title and URL.
-    This creates a deterministic signature for exact duplicate detection.
+    Compute a stable versioned SHA-256 hash for an article based on title and summary.
+    This creates a deterministic signature for content-level exact duplicate detection.
     """
-    payload = f"{title.strip().lower()}|{url.strip().lower()}".encode("utf-8")
+    safe_summary = summary.strip().lower() if summary else ""
+    payload = f"v{HASH_VERSION}|{title.strip().lower()}|{safe_summary}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()

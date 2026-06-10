@@ -6,14 +6,15 @@ collector implementations.
 """
 
 import asyncio
-from dataclasses import dataclass
 from typing import Protocol, Sequence
 
 import structlog
 
 from app.collectors.base import AsyncCollector
 from app.domain.articles import CanonicalArticle, RawArticle
+from app.domain.collectors import CollectorResult
 from app.domain.deduplication import DedupCandidate
+from app.domain.pipeline import PipelineRunResult, PipelineRunStatus
 from app.processors.deduplicator import Deduplicator
 from app.processors.normalizer import ArticleNormalizer
 
@@ -27,20 +28,18 @@ class PersistenceRepository(Protocol):
         """Fetch candidates to run deduplication against."""
         ...
 
-    async def save_articles(self, articles: Sequence[CanonicalArticle]) -> None:
-        """Persist fully processed canonical articles."""
+    async def save_articles(self, articles: Sequence[CanonicalArticle], source_id: str) -> int:
+        """
+        Persist fully processed canonical articles.
+        MUST execute within a per-source transaction boundary.
+        MUST implement ON CONFLICT DO NOTHING for content_hash/url.
+        Returns the number of rows actually inserted.
+        """
         ...
 
-
-@dataclass(frozen=True)
-class PipelineSummary:
-    """Summary of a pipeline execution run."""
-
-    total_fetched: int
-    total_normalized: int
-    total_duplicates: int
-    total_saved: int
-    errors: tuple[str, ...]
+    async def save_run_result(self, result: PipelineRunResult) -> None:
+        """Persist the result of a pipeline run."""
+        ...
 
 
 class IngestionPipeline:
@@ -52,18 +51,40 @@ class IngestionPipeline:
     def __init__(self, repository: PersistenceRepository) -> None:
         self.repository = repository
 
-    async def run(self, collectors: Sequence[AsyncCollector]) -> PipelineSummary:
+    async def _fetch_with_concurrency(
+        self, collectors: Sequence[AsyncCollector]
+    ) -> list[CollectorResult | BaseException]:
+        """
+        Isolate gather orchestration for future bounded concurrency (e.g. asyncio.Semaphore).
+        """
+        from app.core.constants import DEFAULT_PIPELINE_CONCURRENCY
+
+        semaphore = asyncio.Semaphore(DEFAULT_PIPELINE_CONCURRENCY)
+
+        async def _bounded_fetch(collector: AsyncCollector) -> CollectorResult:
+            async with semaphore:
+                return await collector.fetch_raw()
+
+        fetch_tasks = [_bounded_fetch(collector) for collector in collectors]
+        # noinspection PyTypeChecker
+        return await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+    async def run(self, collectors: Sequence[AsyncCollector]) -> PipelineRunResult:
         """
         Execute the ingestion pipeline concurrently across provided collectors.
         """
+        from datetime import datetime, timezone
+
+        started_at = datetime.now(timezone.utc)
+
         log.info("pipeline_started", collector_count=len(collectors))
 
         # 1. Fetch
-        fetch_tasks = [collector.fetch_raw() for collector in collectors]
-        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        results = await self._fetch_with_concurrency(collectors)
 
         raw_articles: list[RawArticle] = []
         errors: list[str] = []
+        failed_sources: list[str] = []
 
         for result in results:
             if isinstance(result, BaseException):
@@ -71,6 +92,7 @@ class IngestionPipeline:
                 continue
             if not result.is_success:
                 errors.append(result.error or "Unknown collector error")
+                failed_sources.append(result.source_id)
                 continue
             raw_articles.extend(result.articles)
 
@@ -78,25 +100,28 @@ class IngestionPipeline:
         log.info("collection_completed", total_fetched=total_fetched, error_count=len(errors))
 
         if not raw_articles:
-            return PipelineSummary(0, 0, 0, 0, tuple(errors))
+            return PipelineRunResult(
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+                status=PipelineRunStatus.FAILED if errors else PipelineRunStatus.COMPLETED,
+                inserted_count=0,
+                duplicate_count=0,
+                failed_sources=tuple(failed_sources),
+                errors=tuple(errors),
+            )
 
         # 2. Normalize
-        canonical_articles = []
+        canonical_articles: list[CanonicalArticle] = []
         for raw in raw_articles:
-            try:
-                canonical = ArticleNormalizer.normalize(raw)
+            canonical = ArticleNormalizer.normalize(raw)
+            if canonical is not None:
                 canonical_articles.append(canonical)
-            except Exception as e:
-                log.warning("normalization_failed", url=raw.url, error=str(e))
-                errors.append(f"Normalization failed for {raw.url}")
-
-        total_normalized = len(canonical_articles)
 
         # 3. Deduplicate
         existing_candidates = await self.repository.get_recent_candidates()
         deduplicator = Deduplicator(existing_candidates)
 
-        unique_articles = []
+        unique_articles: list[CanonicalArticle] = []
         total_duplicates = 0
 
         for article in canonical_articles:
@@ -109,21 +134,43 @@ class IngestionPipeline:
         # 4. Persist
         total_saved = 0
         if unique_articles:
-            try:
-                await self.repository.save_articles(unique_articles)
-                total_saved = len(unique_articles)
-                log.info("persistence_completed", saved_count=total_saved)
-            except Exception as e:
-                log.error("persistence_failed", error=str(e))
-                errors.append(f"Persistence failed: {str(e)}")
+            # Group by source for per-feed transaction boundaries
+            articles_by_source: dict[str, list[CanonicalArticle]] = {}
+            for article in unique_articles:
+                articles_by_source.setdefault(article.source_id, []).append(article)
 
-        summary = PipelineSummary(
-            total_fetched=total_fetched,
-            total_normalized=total_normalized,
-            total_duplicates=total_duplicates,
-            total_saved=total_saved,
+            for source_id, group in articles_by_source.items():
+                try:
+                    inserted_count = await self.repository.save_articles(group, source_id)
+                    total_saved += inserted_count
+                    log.info("persistence_completed", source=source_id, saved_count=inserted_count)
+                except Exception as e:
+                    log.error("persistence_failed", source=source_id, error=str(e))
+                    errors.append(f"Persistence failed for {source_id}: {str(e)}")
+                    failed_sources.append(source_id)
+
+        status = PipelineRunStatus.COMPLETED
+        if errors:
+            status = (
+                PipelineRunStatus.FAILED
+                if total_saved == 0 and total_fetched > 0
+                else PipelineRunStatus.PARTIAL_SUCCESS
+            )
+
+        result_summary = PipelineRunResult(
+            started_at=started_at,
+            completed_at=datetime.now(timezone.utc),
+            status=status,
+            inserted_count=total_saved,
+            duplicate_count=total_duplicates,
+            failed_sources=tuple(set(failed_sources)),
             errors=tuple(errors),
         )
 
-        log.info("pipeline_finished", summary=summary.__dict__)
-        return summary
+        try:
+            await self.repository.save_run_result(result_summary)
+        except Exception as e:
+            log.error("pipeline_run_persistence_failed", error=str(e))
+
+        log.info("pipeline_finished", summary=result_summary.__dict__)
+        return result_summary

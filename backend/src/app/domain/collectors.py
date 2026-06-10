@@ -18,6 +18,7 @@ class SourceMetadata:
     name: str
     url: str
     source_type: str
+    timezone_hint: str = "UTC"
     category: Optional[str] = None
 
 

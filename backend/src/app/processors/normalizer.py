@@ -7,47 +7,66 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
 
+import structlog
+
 from app.domain.articles import CanonicalArticle, RawArticle
 from app.processors.hashing import compute_content_hash
+from app.utils.date_parser import parse_article_date
+
+log = structlog.get_logger()
 
 
 class ArticleNormalizer:
     """Pure processor for transforming raw articles into canonical articles."""
 
     @staticmethod
-    def normalize(article: RawArticle) -> CanonicalArticle:
+    def normalize(article: RawArticle) -> CanonicalArticle | None:
         """
         Convert a RawArticle to a CanonicalArticle.
         Operations are deterministic, side-effect free, and perform no I/O.
+
+        Returns None if normalization fails (e.g. empty title, invalid URL),
+        logging a structured warning instead of raising an exception.
         """
-        clean_url = ArticleNormalizer._normalize_url(article.url)
-        clean_title = ArticleNormalizer._normalize_whitespace(article.title)
-        clean_content = (
-            ArticleNormalizer._normalize_whitespace(article.content) if article.content else None
-        )
-        clean_summary = (
-            ArticleNormalizer._normalize_whitespace(article.summary) if article.summary else None
-        )
+        try:
+            clean_url = ArticleNormalizer._normalize_url(article.url)
+            clean_title = ArticleNormalizer._normalize_whitespace(article.title)
 
-        pub_date = article.published_at
-        if pub_date and pub_date.tzinfo is None:
-            pub_date = pub_date.replace(tzinfo=timezone.utc)
+            if not clean_title or not clean_url:
+                log.warning("normalization_skipped_empty_fields", url=article.url)
+                return None
 
-        content_hash = compute_content_hash(clean_title, clean_url)
+            clean_content = (
+                ArticleNormalizer._normalize_whitespace(article.content)
+                if article.content
+                else None
+            )
+            clean_summary = (
+                ArticleNormalizer._normalize_whitespace(article.summary)
+                if article.summary
+                else None
+            )
 
-        return CanonicalArticle(
-            title=clean_title,
-            url=clean_url,
-            source_id=article.source_id,
-            content_hash=content_hash,
-            content=clean_content,
-            summary=clean_summary,
-            author=article.author.strip() if article.author else None,
-            published_at=pub_date,
-            collected_at=datetime.now(timezone.utc),
-            category=article.category,
-            tags=article.tags,
-        )
+            pub_date = parse_article_date(article.published_at_raw, article.timezone_hint)
+
+            content_hash = compute_content_hash(clean_title, clean_summary)
+
+            return CanonicalArticle(
+                title=clean_title,
+                url=clean_url,
+                source_id=article.source_id,
+                content_hash=content_hash,
+                content=clean_content,
+                summary=clean_summary,
+                author=article.author.strip() if article.author else None,
+                published_at=pub_date,
+                collected_at=datetime.now(timezone.utc),
+                category=article.category,
+                tags=article.tags,
+            )
+        except Exception as e:
+            log.warning("normalization_unexpected_failure", url=article.url, error=str(e))
+            return None
 
     @staticmethod
     def _normalize_whitespace(text: str) -> str:

@@ -14,15 +14,17 @@ class RawArticle:
     """Immutable representation of an article exactly as fetched from a source.
 
     Fields may be missing or unnormalized, directly reflecting what was collected.
+    Normalizer owns all timestamp interpretation.
     """
 
     title: str
     url: str
     source_id: str
+    timezone_hint: str = "UTC"
     content: Optional[str] = None
     summary: Optional[str] = None
     author: Optional[str] = None
-    published_at: Optional[datetime] = None
+    published_at_raw: Optional[str] = None
     category: Optional[str] = None
     tags: tuple[str, ...] = ()
 

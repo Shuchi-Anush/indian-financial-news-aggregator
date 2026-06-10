@@ -21,10 +21,10 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-async def init_engine() -> None:
+async def initialize_database() -> None:
     """Create the async engine and session factory.
 
-    Called once during application startup (see ``core/startup.py``).
+    Called once during application startup or script initialization.
     """
     global _engine, _session_factory  # noqa: PLW0603
 
@@ -38,6 +38,13 @@ async def init_engine() -> None:
         bind=_engine,
         expire_on_commit=False,
     )
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the current async session factory."""
+    if _session_factory is None:
+        raise RuntimeError("Session factory not initialized. Call initialize_database() first.")
+    return _session_factory
 
 
 async def dispose_engine() -> None:
@@ -56,7 +63,7 @@ async def dispose_engine() -> None:
 def get_engine() -> AsyncEngine:
     """Return the current async engine (must be initialized first)."""
     if _engine is None:
-        raise RuntimeError("Database engine not initialized. Call init_engine() first.")
+        raise RuntimeError("Database engine not initialized. Call initialize_database() first.")
     return _engine
 
 
@@ -71,7 +78,7 @@ async def get_db() -> AsyncIterator[AsyncSession]:
             return ArticleService(db)
     """
     if _session_factory is None:
-        raise RuntimeError("Session factory not initialized. Call init_engine() first.")
+        raise RuntimeError("Session factory not initialized. Call initialize_database() first.")
 
     async with _session_factory() as session:
         yield session
