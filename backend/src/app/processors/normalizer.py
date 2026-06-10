@@ -3,9 +3,12 @@
 Ensures deterministic formatting of fields without side-effects or I/O.
 """
 
+import html
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urlunparse
+
+from bs4 import BeautifulSoup
 
 import structlog
 
@@ -36,18 +39,29 @@ class ArticleNormalizer:
                 log.warning("normalization_skipped_empty_fields", url=article.url)
                 return None
 
+            clean_title = clean_title[:512]
+
             clean_content = (
-                ArticleNormalizer._normalize_whitespace(article.content)
-                if article.content
-                else None
+                ArticleNormalizer._normalize_text(article.content) if article.content else None
             )
             clean_summary = (
-                ArticleNormalizer._normalize_whitespace(article.summary)
-                if article.summary
-                else None
+                ArticleNormalizer._normalize_text(article.summary) if article.summary else None
             )
 
             pub_date = parse_article_date(article.published_at_raw, article.timezone_hint)
+
+            # Freshness filter
+            if pub_date:
+                from app.core.constants import MAX_ARTICLE_AGE_HOURS
+
+                age = datetime.now(timezone.utc) - pub_date
+                if age > timedelta(hours=MAX_ARTICLE_AGE_HOURS):
+                    log.info(
+                        "article_rejected_stale",
+                        url=article.url,
+                        age_hours=age.total_seconds() / 3600,
+                    )
+                    return None
 
             content_hash = compute_content_hash(clean_title, clean_summary)
 
@@ -58,7 +72,7 @@ class ArticleNormalizer:
                 content_hash=content_hash,
                 content=clean_content,
                 summary=clean_summary,
-                author=article.author.strip() if article.author else None,
+                author=article.author.strip()[:256] if article.author else None,
                 published_at=pub_date,
                 collected_at=datetime.now(timezone.utc),
                 category=article.category,
@@ -73,7 +87,21 @@ class ArticleNormalizer:
         """Remove excessive whitespace and strip."""
         if not text:
             return ""
+        # Basic whitespace cleanup for title
+        text = html.unescape(text)
         return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Safely strip HTML, decode entities, and normalize whitespace."""
+        if not text:
+            return ""
+        # Parse HTML safely
+        soup = BeautifulSoup(text, "html.parser")
+        # Extract text (which decodes entities and drops tags)
+        raw_text = soup.get_text(separator=" ")
+        # Clean whitespace
+        return re.sub(r"\s+", " ", raw_text).strip()
 
     @staticmethod
     def _normalize_url(url: str) -> str:

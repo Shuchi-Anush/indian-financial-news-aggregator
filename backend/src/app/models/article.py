@@ -81,8 +81,8 @@ class Article(TimestampMixin, Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
-    title: Mapped[str] = mapped_column(String(512), nullable=False)
-    url: Mapped[str] = mapped_column(String(2048), unique=True, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(String(4096), unique=True, nullable=False, index=True)
     content_hash: Mapped[str] = mapped_column(
         String(64),
         unique=True,
@@ -92,8 +92,8 @@ class Article(TimestampMixin, Base):
     )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    author: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    source_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    author: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
     published_at: Mapped[datetime | None] = mapped_column(
@@ -101,6 +101,10 @@ class Article(TimestampMixin, Base):
         nullable=True,
         index=True,
         comment="Nullable: some RSS feeds omit pubDate. NULLs excluded from time-range queries.",
+    )
+
+    quality_score: Mapped[float | None] = mapped_column(
+        nullable=True, comment="Quality gate score 0.0-1.0"
     )
 
     # --- Classification fields (nullable — populated by processor / future ML) ---

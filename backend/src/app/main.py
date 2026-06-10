@@ -8,12 +8,17 @@ Run with::
     uv run uvicorn app.main:app --app-dir src --reload
 """
 
+from app.core.env_loader import load_environment
+
+load_environment()
+
 from app.core.logging import setup_logging
 
 # Configure structured logging before anything else
 setup_logging()
 
 from fastapi import FastAPI  # noqa: E402
+from fastapi.responses import PlainTextResponse  # noqa: E402
 
 from app.core.exceptions import register_exception_handlers  # noqa: E402
 from app.core.middleware import register_middleware  # noqa: E402
@@ -37,3 +42,11 @@ register_exception_handlers(app)
 async def health_check() -> dict[str, str]:
     """Liveness probe — returns 200 if the process is running."""
     return {"status": "ok"}
+
+
+@app.get("/metrics", tags=["system"])
+async def metrics_endpoint() -> PlainTextResponse:
+    """Expose Prometheus-compatible operational metrics."""
+    from app.core.metrics import export_metrics
+
+    return PlainTextResponse(await export_metrics())

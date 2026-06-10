@@ -6,7 +6,19 @@ are free of any framework-specific or ORM dependencies.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
+
+
+@dataclass(frozen=True)
+class FailedArticle:
+    """Immutable representation of a failed processing item."""
+
+    source_id: str
+    failure_stage: str
+    error_type: str
+    error_message: str
+    raw_payload: dict[str, Any] | None = None
+    traceback: str | None = None
 
 
 @dataclass(frozen=True)
@@ -27,6 +39,7 @@ class RawArticle:
     published_at_raw: Optional[str] = None
     category: Optional[str] = None
     tags: tuple[str, ...] = ()
+    raw_payload: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +61,7 @@ class CanonicalArticle:
     published_at: Optional[datetime] = None
     category: Optional[str] = None
     tags: tuple[str, ...] = ()
+    quality_score: Optional[float] = None
 
     @property
     def is_complete(self) -> bool:

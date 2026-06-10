@@ -21,6 +21,17 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+import sys
+from pathlib import Path
+
+# Fix import path for env.py to find env_loader
+backend_dir = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(backend_dir / "src"))
+
+from app.core.env_loader import load_environment
+
+load_environment()
+
 from app.db.base import Base
 import app.models.article  # noqa: F401
 import app.models.feed_source  # noqa: F401

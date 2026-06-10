@@ -9,6 +9,7 @@ from __future__ import annotations
 import enum
 import uuid
 from typing import TYPE_CHECKING
+from datetime import datetime
 
 from sqlalchemy import String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -25,6 +26,14 @@ class SourceType(enum.Enum):
     RSS = "rss"
     API = "api"
     SCRAPER = "scraper"
+
+
+class SourceHealth(enum.Enum):
+    """Operational health status of the source."""
+
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    BLOCKED = "blocked"
 
 
 class FeedSource(TimestampMixin, Base):
@@ -55,6 +64,23 @@ class FeedSource(TimestampMixin, Base):
     timezone_hint: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- Source Health ---
+    from sqlalchemy import DateTime, Enum as SAEnum
+
+    health_status: Mapped[SourceHealth] = mapped_column(
+        SAEnum(SourceHealth, native_enum=False, create_constraint=False, length=32),
+        nullable=False,
+        server_default="HEALTHY",
+    )
+    consecutive_failures: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    last_success_at: Mapped["datetime | None"] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_failed_at: Mapped["datetime | None"] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_type: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     # --- Relationships ---
     articles: Mapped[list["Article"]] = relationship(  # noqa: F821
