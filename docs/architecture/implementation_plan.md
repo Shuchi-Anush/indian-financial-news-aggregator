@@ -1,59 +1,103 @@
-# Analytics, Enrichment, and Intelligence Layer Plan
+# Implementation Plan: Repository Maturity + Documentation Engineering
 
-This plan details the transformation of the platform from a news aggregation backend into a financial intelligence backend using deterministic, high-performance, and bounded-resource strategies.
+This document outlines the systematic transformation of the Indian Financial News Aggregator repository into a production-grade, OSS-ready engineering project with elite documentation quality. The primary goal is to establish operational maturity, onboarding quality, architecture clarity, and AI-agent context systems.
+
+## User Review Required
+
+> [!WARNING]
+> Please review the file structure mapping below. Once approved, I will sequentially generate and update all documentation files based on the actual implemented source code.
+> No runtime logic will be modified during this phase. All diagrams (Mermaid) will strictly reflect the current system architecture.
 
 ## Proposed Changes
 
-### 1. Database Schema Extensions (Phase 1, 2, 3, 4, 5, 6, 8)
-We will create a new Alembic migration to add the following tables and fields:
-- **`Article` updates**:
-  - `sentiment_label` (VARCHAR)
-  - `sentiment_score` (FLOAT)
-  - `generated_summary` (TEXT)
-- **New Tables**:
-  - `article_entities` (id, article_id, entity, entity_type, confidence, extractor_version)
-    - composite unique index `(article_id, entity, entity_type)`
-  - `article_sectors` (id, article_id, sector, score)
-    - composite unique index `(article_id, sector)`
-  - `article_keywords` (id, article_id, keyword, weight)
-    - composite unique index `(article_id, keyword)`
-- **Analytics Materialized Views**:
-  - `hourly_trends_mv`
-  - `sentiment_summaries_mv`
-  - Materialized views will use `CONCURRENTLY` refreshes (requires unique index) or standard refreshes based on Postgres compatibility.
+We will execute the documentation generation in organized phases corresponding to your instructions.
 
-### 2. Enrichment Pipeline Architecture (Phase 1)
-- Create `src/app/enrichment/` directory.
-- `orchestrator.py`: `EnrichmentOrchestrator` that takes a `NormalizedArticle` AFTER deduplication and runs it through isolated, async-safe processor stages.
-- The pipeline order will be: RAW → NORMALIZED → DEDUPLICATED → ENRICHED → PERSISTED.
-- Processors will be interface-driven, allowing future AI drop-ins.
-- If a processor fails, it catches the exception, logs it, and continues. Metrics track processor_name, failure_count, failure_rate, and last_failure_timestamp.
+### Phase 1: Repository Audit
+(Already completed locally) Discovered existing files in `docs/`, `.agy/`, `.claude/`. We will integrate, replace, or prune these as needed to ensure zero duplication and strict alignment with actual implementation.
 
-### 3. Deterministic Engines (Phase 2, 3, 4, 5, 6)
-- **Entities (`entities.py`)**: Uses optimized regex/dictionaries for major Indian financial entities. Implements strict bounds on memory and regex complexity.
-- **Sectors (`sectors.py`)**: Explicit weighted keyword maps instead of ML heuristics.
-- **Sentiment (`sentiment.py`)**: A financial lexicon dictionary mapping bullish/bearish words deterministically.
-- **Keywords (`keywords.py`)**: Frequency analysis with stopword removal.
-- **Summarization (`summaries.py`)**: Extractive summarizer hidden behind a feature flag (`ENABLE_SUMMARIZATION=False` by default). Skips tiny articles and bounds sentence counts.
+---
 
-### 4. Analytics Engine & APIs (Phase 7, 8, 9, 10)
-- Create `src/app/analytics/` directory.
-- `aggregations.py`: Functions to refresh materialized views asynchronously.
-- `src/app/api/routes/analytics.py`: Add `/analytics/trending`, `/analytics/entities`, `/analytics/sectors`, `/analytics/sentiment`, `/analytics/activity`.
-- Time windows supported (1h, 6h, 24h, 7d).
-- Trending computation uses simple exponential time decay or weighted recent scoring.
-- Update `articles.py` to support `?sector=X&sentiment=Y&entity=Z&keyword=W` query parameters using optimized `EXISTS` subqueries to avoid JOIN explosions.
+### Phase 2: Root Documentation
 
-### 5. Performance & Observability (Phase 11, 12)
-- Ensure all dictionary lookups are compiled once at module load (O(1) or O(N) regex scanning).
-- Use `structlog` for enrichment latency and failure tracking.
-- Update `/admin/pipeline/status` and add `/admin/analytics/status` to expose new metrics.
-- Track metrics using existing `registry` mechanism.
+#### [NEW/MODIFY] [README.md](file:///d:/indian-financial-news-aggregator/README.md)
+Will include platform overview, capability summary, tech stack, quickstart, API highlights, and production readiness statement.
 
-### 6. Validation (Phase 13, 14)
-- Create `docs/analytics_validation.md`.
-- Add test coverage in `tests/test_enrichment.py` and `tests/test_analytics.py`.
-- Final verification via `mypy`, `ruff`, `pytest`, `compileall`, and Docker.
+#### [NEW/MODIFY] [ROADMAP.md](file:///d:/indian-financial-news-aggregator/ROADMAP.md)
+Will separate roadmap into completed, in-progress, future, scalability, ML, and infra tracks based on current state.
 
-## Open Questions
-- None. User has confirmed the deterministic architecture with 12 critical corrections. Execution will proceed.
+#### [NEW/MODIFY] [CONTRIBUTING.md](file:///d:/indian-financial-news-aggregator/CONTRIBUTING.md)
+Will include strict coding standards, commit/branching conventions, testing expectations, and migration workflows.
+
+#### [NEW/MODIFY] [ARCHITECTURE.md](file:///d:/indian-financial-news-aggregator/ARCHITECTURE.md)
+Will consolidate deep architectural explanations of ingestion, orchestration, persistence, analytics, resilience systems, and DB strategy.
+
+---
+
+### Phase 3: Backend Documentation
+
+#### [MODIFY] [backend/README.md](file:///d:/indian-financial-news-aggregator/backend/README.md)
+Will serve as the core technical index for the backend. Will cover FastAPI lifecycle, async architecture, repository pattern, keyset pagination, materialized views, and known performance bottlenecks.
+
+---
+
+### Phase 4: Operations Documentation
+
+#### [NEW] [docs/operations/DEPLOYMENT.md](file:///d:/indian-financial-news-aggregator/docs/operations/DEPLOYMENT.md)
+#### [NEW] [docs/operations/OPERATIONS.md](file:///d:/indian-financial-news-aggregator/docs/operations/OPERATIONS.md)
+#### [NEW] [docs/operations/MONITORING.md](file:///d:/indian-financial-news-aggregator/docs/operations/MONITORING.md)
+#### [NEW] [docs/operations/INCIDENT_RESPONSE.md](file:///d:/indian-financial-news-aggregator/docs/operations/INCIDENT_RESPONSE.md)
+#### [NEW] [docs/operations/BACKUP_AND_RECOVERY.md](file:///d:/indian-financial-news-aggregator/docs/operations/BACKUP_AND_RECOVERY.md)
+#### [NEW] [docs/operations/SCALING.md](file:///d:/indian-financial-news-aggregator/docs/operations/SCALING.md)
+#### [NEW] [docs/operations/SECURITY.md](file:///d:/indian-financial-news-aggregator/docs/operations/SECURITY.md)
+These files will offer real engineering guidance on Docker recovery, DB restarts, Prometheus metrics interpretation, and migration recovery.
+
+---
+
+### Phase 5: Validation Documentation
+
+#### [NEW] [docs/validation/VALIDATION.md](file:///d:/indian-financial-news-aggregator/docs/validation/VALIDATION.md)
+#### [NEW] [docs/validation/CHAOS_TESTING.md](file:///d:/indian-financial-news-aggregator/docs/validation/CHAOS_TESTING.md)
+#### [NEW] [docs/validation/API_BRUTALIZATION.md](file:///d:/indian-financial-news-aggregator/docs/validation/API_BRUTALIZATION.md)
+#### [NEW] [docs/validation/DATABASE_VALIDATION.md](file:///d:/indian-financial-news-aggregator/docs/validation/DATABASE_VALIDATION.md)
+#### [NEW] [docs/validation/PERFORMANCE.md](file:///d:/indian-financial-news-aggregator/docs/validation/PERFORMANCE.md)
+These files will explain how the brutalization and chaos tests work, expected failure modes, and operational significance.
+
+---
+
+### Phase 6: AI Agent Context Systems
+
+#### [NEW] [.agy/repository_rules.md](file:///d:/indian-financial-news-aggregator/.agy/repository_rules.md)
+#### [NEW] [.claude/architecture_context.md](file:///d:/indian-financial-news-aggregator/.claude/architecture_context.md)
+#### [NEW] [.claude/coding_principles.md](file:///d:/indian-financial-news-aggregator/.claude/coding_principles.md)
+#### [NEW] [.claude/operational_constraints.md](file:///d:/indian-financial-news-aggregator/.claude/operational_constraints.md)
+#### [NEW] [.claude/validation_rules.md](file:///d:/indian-financial-news-aggregator/.claude/validation_rules.md)
+#### [NEW] [.claude/async_patterns.md](file:///d:/indian-financial-news-aggregator/.claude/async_patterns.md)
+#### [NEW] [.claude/migration_rules.md](file:///d:/indian-financial-news-aggregator/.claude/migration_rules.md)
+Will encode deep architectural philosophy to keep future AI agents aligned with the codebase's strict standards.
+
+---
+
+### Phase 7: Architecture Diagram Documentation
+
+#### [NEW] [docs/architecture/diagrams.md](file:///d:/indian-financial-news-aggregator/docs/architecture/diagrams.md)
+Will include Mermaid diagrams for ingestion flow, article lifecycle, enrichment lifecycle, scheduler lifecycle, and analytics refresh flow.
+
+---
+
+### Phase 8: Frontend + Infra Preparation
+
+#### [NEW] [frontend/README.md](file:///d:/indian-financial-news-aggregator/frontend/README.md)
+#### [NEW] [infra/README.md](file:///d:/indian-financial-news-aggregator/infra/README.md)
+Will outline intended integration contracts, deployment expectations, and API interaction models.
+
+---
+
+### Phase 9 & 10: Quality Pass & Final Validation
+After generating the docs, I will execute a thorough verification to ensure NO fake scalability claims or hallucinated features are present. I will generate a final audit report.
+
+## Verification Plan
+
+### Manual Verification
+- Review generated Mermaid diagrams for syntax errors.
+- Confirm that no existing backend logic or configuration was altered.
+- Provide the final documentation audit report detailing the exact changes and operational gaps remaining.
