@@ -62,11 +62,14 @@ jobs:
       - name: Sync Dependencies
         run: uv sync --frozen
 
+      - name: Verify Lockfile Consistency
+        run: git diff --exit-code uv.lock
+
       - name: Run Ruff
-        run: uv run ruff check .
+        run: uv run ruff check src tests
 
       - name: Run Mypy
-        run: uv run mypy .
+        run: uv run mypy src
 
       - name: Run Alembic Migrations
         run: uv run alembic upgrade head
@@ -78,5 +81,4 @@ jobs:
         run: uv run python -m compileall src
 
       - name: Validate Docker Build
-        working-directory: .
         run: docker compose build backend
