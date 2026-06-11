@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.db.session import dispose_engine, get_engine, initialize_database
+from app.orchestration.scheduler import start_scheduler, stop_scheduler
 
 log = structlog.get_logger()
 
@@ -55,8 +56,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Verify database health instead of auto-creating tables
     await _verify_database_health()
 
+    start_scheduler()
+
     yield
 
+    stop_scheduler()
     # Shutdown: release database connections
     await dispose_engine()
     log.info("application_shutdown")

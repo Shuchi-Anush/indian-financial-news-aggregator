@@ -9,7 +9,7 @@ class PipelineRunStatus(enum.Enum):
     """Execution status of an ingestion pipeline run."""
 
     RUNNING = "running"
-    COMPLETED = "completed"
+    SUCCESS = "success"
     PARTIAL_SUCCESS = "partial_success"
     FAILED = "failed"
 
@@ -20,8 +20,12 @@ class PipelineRunResult:
 
     started_at: datetime
     completed_at: datetime
+    duration_ms: int
+    articles_ingested: int
+    duplicates_detected: int
+    failures: int
+    source_count: int
     status: PipelineRunStatus
-    inserted_count: int
-    duplicate_count: int
-    failed_sources: tuple[str, ...]
-    errors: tuple[str, ...]
+    trigger_type: str
+    error_summary: str | None = None
+    failed_sources: list[str] | None = None

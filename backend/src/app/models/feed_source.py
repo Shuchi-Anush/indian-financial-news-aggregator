@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import enum
 import uuid
-from typing import TYPE_CHECKING
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -28,12 +28,12 @@ class SourceType(enum.Enum):
     SCRAPER = "scraper"
 
 
-class SourceHealth(enum.Enum):
-    """Operational health status of the source."""
+class CircuitBreakerState(enum.Enum):
+    """Circuit breaker states for sources."""
 
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    BLOCKED = "blocked"
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
 
 
 class FeedSource(TimestampMixin, Base):
@@ -66,21 +66,25 @@ class FeedSource(TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- Source Health ---
-    from sqlalchemy import DateTime, Enum as SAEnum
+    from sqlalchemy import DateTime, Float
+    from sqlalchemy import Enum as SAEnum
 
-    health_status: Mapped[SourceHealth] = mapped_column(
-        SAEnum(SourceHealth, native_enum=False, create_constraint=False, length=32),
+    circuit_breaker_state: Mapped[CircuitBreakerState] = mapped_column(
+        SAEnum(CircuitBreakerState, native_enum=False, create_constraint=False, length=32),
         nullable=False,
-        server_default="HEALTHY",
+        server_default="CLOSED",
     )
+    success_count: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    failure_count: Mapped[int] = mapped_column(nullable=False, server_default="0")
     consecutive_failures: Mapped[int] = mapped_column(nullable=False, server_default="0")
     last_success_at: Mapped["datetime | None"] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    last_failed_at: Mapped["datetime | None"] = mapped_column(
+    last_failure_at: Mapped["datetime | None"] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    error_type: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    health_score: Mapped[float] = mapped_column(Float, nullable=False, server_default="100.0")
 
     # --- Relationships ---
     articles: Mapped[list["Article"]] = relationship(  # noqa: F821

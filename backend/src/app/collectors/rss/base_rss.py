@@ -1,5 +1,7 @@
 """Base RSS Collector for Indian Financial News Aggregator."""
 
+import asyncio
+import random
 from typing import Any, Optional
 
 import feedparser  # type: ignore[import-untyped]
@@ -22,6 +24,47 @@ class BaseRSSCollector(AsyncCollector):
         """Return a standardized User-Agent to prevent 403 blocks."""
         return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+    async def _fetch_with_retry(self, client: httpx.AsyncClient) -> httpx.Response:
+        """Fetch URL with intelligent retry policies (TRANSIENT, RATE_LIMITED, PERMANENT)."""
+        max_retries = 3
+        base_delay = 2.0
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = await client.get(self.metadata.url)
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if status == 429:  # RATE_LIMITED
+                    retry_after = e.response.headers.get("Retry-After")
+                    delay = (
+                        int(retry_after)
+                        if retry_after and retry_after.isdigit()
+                        else base_delay * (2**attempt)
+                    )
+                    self.log.warning("rate_limited", status=status, attempt=attempt, delay=delay)
+                elif status in (500, 502, 503, 504):  # TRANSIENT
+                    delay = base_delay * (2**attempt) + random.uniform(0, 1)
+                    self.log.warning(
+                        "transient_http_error", status=status, attempt=attempt, delay=delay
+                    )
+                else:
+                    # PERMANENT
+                    raise e
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                # TRANSIENT
+                delay = base_delay * (2**attempt) + random.uniform(0, 1)
+                self.log.warning(
+                    "transient_connection_error", error=str(e), attempt=attempt, delay=delay
+                )
+
+            if attempt == max_retries:
+                raise Exception(f"Max retries exceeded fetching {self.metadata.url}")
+
+            await asyncio.sleep(delay)
+        raise Exception("Unreachable")
+
     async def fetch_raw(self) -> CollectorResult:
         """Fetch and parse the RSS feed asynchronously."""
         try:
@@ -29,16 +72,13 @@ class BaseRSSCollector(AsyncCollector):
             async with httpx.AsyncClient(
                 timeout=DEFAULT_RSS_TIMEOUT_SECONDS, headers=headers, follow_redirects=True
             ) as client:
-                response = await client.get(self.metadata.url)
-                response.raise_for_status()
+                response = await self._fetch_with_retry(client)
                 feed_content = response.text
 
-        except httpx.TimeoutException as e:
-            return self._create_error_result(f"Timeout fetching RSS feed: {str(e)}")
-        except httpx.RequestError as e:
-            return self._create_error_result(f"Request error fetching RSS feed: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            return self._create_error_result(f"Permanent HTTP error: {e.response.status_code}")
         except Exception as e:
-            return self._create_error_result(f"Unexpected error fetching RSS feed: {str(e)}")
+            return self._create_error_result(f"Fetch failed: {str(e)}")
 
         try:
             parsed_feed = feedparser.parse(feed_content)

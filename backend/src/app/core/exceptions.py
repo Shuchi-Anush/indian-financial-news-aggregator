@@ -10,7 +10,6 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-
 # ---------------------------------------------------------------------------
 # Base exception
 # ---------------------------------------------------------------------------

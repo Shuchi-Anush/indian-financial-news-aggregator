@@ -1,0 +1,32 @@
+- `[x]` 1. **Schema & DB Setup (Phases 1-8)**
+  - `[x]` Define new SQLAlchemy models: `ArticleEntity`, `ArticleSector`, `ArticleKeyword`.
+  - `[x]` Update `Article` model with sentiment and summary fields.
+  - `[x]` Define Materialized Views for `hourly_trends_mv` and `sentiment_summaries_mv`.
+  - `[x]` Generate and apply Alembic migration.
+- `[x]` 2. **Enrichment Pipeline Foundation (Phases 1, 9, 11)**
+  - `[x]` Define `EnrichmentProcessor` interface.
+  - `[x]` Build `EnrichmentOrchestrator` to catch and log failures.
+  - `[x]` Reorder ingestion pipeline: RAW -> NORMALIZED -> DEDUPLICATED -> ENRICHED -> PERSISTED.
+- `[x]` 3. **Deterministic Engines (Phases 2-6)**
+  - `[x]` Implement `EntityExtractor` (Regex + Dict, versioned, bounds).
+  - `[x]` Implement `SectorClassifier` (Weighted dict).
+  - `[x]` Implement `SentimentEngine` (Lexicon rule-based).
+  - `[x]` Implement `KeywordExtractor` (Freq + stopwords).
+  - `[x]` Implement `Summarizer` (Feature flagged, size bounds).
+- `[x]` 4. **Analytics Database & Aggregation Engine (Phases 7, 8)**
+  - `[x]` Build async `refresh_materialized_views()`.
+  - `[x]` Hook refresh logic into the background scheduler or pipeline post-processing.
+- `[x]` 5. **Analytics APIs (Phase 9)**
+  - `[x]` Build `AnalyticsRepository`.
+  - `[x]` Build `/analytics/trending` (with exponential time decay).
+  - `[x]` Build `/analytics/entities`, `/analytics/sectors`, `/analytics/sentiment`, `/analytics/activity` (with time windows).
+- `[x]` 6. **Search Enhancements (Phase 10)**
+  - `[x]` Add `EXISTS` subqueries for entity, sector, keyword, sentiment filtering in `ArticleReadService`.
+- `[x]` 7. **Operational Metrics & Observability (Phases 11-12)**
+  - `[x]` Add enrichment latency, failure rates, and refresh durations to Prometheus metrics.
+  - `[x]` Add `/admin/enrichment/status` and `/admin/analytics/status` routes.
+- `[x]` 8. **Validation & Documentation (Phases 13-14)**
+  - `[x]` Write `docs/analytics_validation.md`.
+  - `[x]` Add comprehensive unit tests in `tests/`.
+  - `[x]` Run validation (`ruff`, `mypy`, `pytest`, `compileall`).
+  - `[x]` Verify Docker build.

@@ -1,4 +1,5 @@
 """Manual ingestion trigger for local development and testing."""
+# ruff: noqa: E402
 
 import asyncio
 import sys

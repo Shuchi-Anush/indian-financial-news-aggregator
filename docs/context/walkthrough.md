@@ -1,115 +1,51 @@
-# Walkthrough: Phase 1 — Backend Core Runtime Foundation
+# READ API Architecture Implementation Complete
 
-## Files Implemented
+The production-grade READ API architecture layer has been fully implemented, adhering to the required architecture boundaries and keyset pagination constraints.
 
-| File | Lines | Responsibility |
-|------|-------|---------------|
-| [core/__init__.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/__init__.py) | 1 | Package marker |
-| [core/config.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/config.py) | 66 | Typed settings via pydantic-settings, cached loader |
-| [core/logging.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/logging.py) | 72 | Structlog setup — dev console / prod JSON modes |
-| [core/exceptions.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/exceptions.py) | 121 | Domain exception hierarchy + FastAPI error handlers |
-| [core/middleware.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/middleware.py) | 119 | Request ID, request logging, CORS |
-| [core/startup.py](file:///d:/indian-financial-news-aggregator/backend/src/app/core/startup.py) | 47 | Lifespan context manager (startup/shutdown) |
-| [db/base.py](file:///d:/indian-financial-news-aggregator/backend/src/app/db/base.py) | 50 | Declarative base + TimestampMixin |
-| [db/session.py](file:///d:/indian-financial-news-aggregator/backend/src/app/db/session.py) | 78 | Async engine lifecycle + session DI |
-| [main.py](file:///d:/indian-financial-news-aggregator/backend/src/app/main.py) | 39 | Composition root — wires everything |
+## Changes Made
 
-**Also modified:** [Dockerfile](file:///d:/indian-financial-news-aggregator/backend/Dockerfile) — changed CMD to use `--app-dir src` for correct import resolution.
+### 1. Database & Models (Phase 1)
+- **`Article` Model Hardening**:
+  - Added a generated `tsvector` column (`search_vector`) to compute and store search indices natively in PostgreSQL.
+  - Set `lazy="raise"` on the `feed_source` relationship to prevent accidental N+1 queries.
+  - Added necessary composite indexes for optimized keyset pagination and source filtering: `(published_at DESC, id DESC)` and `(source_name, published_at DESC)`.
+- **Alembic Migration**:
+  - Auto-generated and successfully applied the Alembic migration `search_vector_and_indexes` against the PostgreSQL database.
 
----
+### 2. Schemas & Contracts (Phase 2)
+- **Common Schemas**:
+  - Created `CursorPage` and `PaginationMeta` for generic paginated responses.
+- **Entity Schemas**:
+  - `ArticleListItem`: Lightweight projection without content body.
+  - `ArticleDetail`: Full representation with text content.
+  - `ArticleFilters`: Strongly typed filters structure.
+  - `SourceResponse` and `PipelineRunResponse` created mapping to domain models.
 
-## Key Design Decisions
+### 3. Cursor Engine (Phase 3)
+- Implemented `CursorEngine` in `src/app/utils/cursor.py` to handle opaque, URL-safe base64 encoding and decoding.
+- The cursor natively embeds the keys `p` (published_at), `i` (id), and optionally `r` (ts_rank) for deterministic fast keyset pagination.
 
-### Import Path: `app.*` with `--app-dir src`
-The project uses a `src/` layout. Instead of `from src.app.core.config import ...`, all imports use `from app.core.config import ...` — the standard convention for src-layout Python projects. The Dockerfile and uvicorn invocation use `--app-dir src` to set the correct root.
+### 4. Repository Layer (Phase 4)
+- **`ArticleRepository`**:
+  - Implemented `list_articles` with explicit column projection (no `.body` or `.summary` loaded).
+  - Full keyset pagination support: Handles complex sorting logic `(ts_rank DESC, published_at DESC, id DESC)` for searches, and `(published_at DESC, id DESC)` for default listing.
+  - Implemented `get_by_id`.
+- **`PipelineRepository`** & **`SourceRepository`**: Add### Read API and Export Platform
+- Keyset pagination for `GET /api/articles` to support infinite scrolling securely.
+- CSV/Excel stream-based exporters using efficient yield-based chunking.
+- Date, source, and text-based query filtering.
 
-### Logging Before Everything
-`setup_logging()` is called at module-level in `main.py` before any other imports. This ensures structlog is configured before the first log event (including startup logs from the lifespan handler).
+### Orchestration and Resilience Layer
+- **APScheduler Integration**: Runs ingestion cycles on an asynchronous background interval tightly coupled to the FastAPI lifespan.
+- **Ingestion Run Locking**: PostgreSQL `pg_try_advisory_lock` protects against overlap across multiple Docker replicas.
+- **Retry Policy Engine**: Implemented `_fetch_with_retry` in `base_rss.py` covering TRANSIENT (jittered exponential backoff), RATE_LIMITED (reads `Retry-After`), and PERMANENT mapping.
+- **Circuit Breaker System**: Automatically skips sources marked as `OPEN` if they experience repeated unrecoverable failures.
+- **Admin Dashboard APIs**: Read routes (`/admin/pipeline/status`, `runs`, `sources/health`) to give an operational view of system health.
+- **Metrics Expansion**: Exposed pipeline run durations and source health states.cles`, `sources`, and `pipeline_runs`.
+- Registered all routers gracefully in `src/app/main.py`.
+- Services correctly decouple Repositories and Routers by handling cursor generation, `limit+1` truncation (`has_more`), and mapping Database Rows to Pydantic models.
 
-### Module-Level DB State
-`db/session.py` uses module-level `_engine` and `_session_factory` variables initialized once during startup via `init_engine()`. This avoids DI frameworks or global state managers while remaining testable (can call `init_engine()` with different configs in tests).
-
-### Exception Hierarchy
-```
-AppError (500, internal_error)
-├── NotFoundError (404, not_found)
-├── CollectorError (502, collector_error)
-├── NormalizationError (422, normalization_error)
-├── DuplicateArticleError (409, duplicate_article)
-└── ExportError (500, export_error)
-```
-Each exception carries `status_code`, `error_code`, `message`, and optional `details`. The FastAPI handler converts them into consistent `{error, message, details?}` JSON.
-
-### Middleware Order (LIFO)
-Registered in this order (LIFO means first-registered = outermost):
-1. `RequestIdMiddleware` — generates UUID, binds to structlog contextvars
-2. `RequestLoggingMiddleware` — logs method/path/status/duration (includes request_id from contextvars)
-3. `CORSMiddleware` — permissive in dev, locked down in prod
-
----
-
-## Verification Results
-
-### Import Check (no circular deps)
-```
-[OK] logging
-[OK] exceptions
-[OK] middleware
-[OK] startup
-[OK] db/base
-[OK] db/session
-[OK] ALL IMPORTS PASSED — no circular dependencies
-```
-
-### Server Startup
-```
-application_startup            app_env=development backend_port=8000 postgres_host=localhost
-database_engine_initialized
-Application startup complete.
-Uvicorn running on http://127.0.0.1:8000
-```
-
-### Request Tracing
-```
-request_completed  method=GET path=/health       status=200 duration_ms=12.06 request_id=1b28d4bb-...
-request_completed  method=GET path=/openapi.json  status=200 duration_ms=21.05 request_id=2e068e44-...
-request_completed  method=GET path=/nonexistent   status=404 duration_ms=0.2   request_id=cfaa9b40-...
-```
-
-### Health Check Response
-```json
-{"status": "ok"}
-```
-
----
-
-## Run Commands
-
-```bash
-# From backend/ directory:
-
-# Install dependencies
-uv sync
-
-# Start server (local dev)
-uv run uvicorn app.main:app --app-dir src --reload --host 127.0.0.1 --port 8000
-
-# Verify
-curl http://127.0.0.1:8000/health
-# → {"status":"ok"}
-
-# Docker (full stack)
-docker compose up --build
-```
-
----
-
-## Extension Points for Next Phase
-
-| Next Step | Where |
-|-----------|-------|
-| Add ORM models (Article, FeedSource) | `models/article.py`, `models/feed_source.py` |
-| Add Pydantic schemas | `schemas/article.py`, `schemas/feed.py` |
-| Add `create_all()` to lifespan | `core/startup.py` (after `init_engine()`) |
-| Add API routes | `api/routes/` → mount in `main.py` |
-| Add services | `services/` → use `get_db()` via DI |
+## Validation Results
+- `mypy` strict checks pass.
+- `ruff` auto-fixes pass cleanly across the new services, repositories, schemas, and routes.
+- Database starts up via Docker seamlessly. The FastAPI application boots properly and binds without failure.

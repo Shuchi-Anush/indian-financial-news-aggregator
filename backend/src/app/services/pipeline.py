@@ -6,16 +6,22 @@ collector implementations.
 """
 
 import asyncio
-from typing import Protocol, Sequence, AsyncContextManager
+from typing import AsyncContextManager, Protocol, Sequence
 
 import structlog
 
 from app.collectors.base import AsyncCollector
 from app.core.metrics import registry
-from app.domain.articles import CanonicalArticle, FailedArticle, RawArticle
+from app.domain.articles import CanonicalArticle, FailedArticle, RawArticle, EnrichedArticle
 from app.domain.collectors import CollectorResult
 from app.domain.deduplication import DedupCandidate
 from app.domain.pipeline import PipelineRunResult, PipelineRunStatus
+from app.enrichment.entities import EntityExtractor
+from app.enrichment.keywords import KeywordExtractor
+from app.enrichment.orchestrator import EnrichmentOrchestrator
+from app.enrichment.sectors import SectorClassifier
+from app.enrichment.sentiment import SentimentEngine
+from app.enrichment.summaries import ExtractiveSummarizer
 from app.processors.deduplicator import Deduplicator
 from app.processors.normalizer import ArticleNormalizer
 from app.processors.quality_gate import QualityGate
@@ -26,11 +32,13 @@ log = structlog.get_logger()
 class PersistenceRepository(Protocol):
     """Protocol defining the required persistence contract for the pipeline."""
 
+    async def get_active_sources(self) -> Sequence[dict]: ...
+
     async def get_recent_candidates(self) -> Sequence[DedupCandidate]: ...
 
     async def save_articles(self, articles: Sequence[CanonicalArticle], source_id: str) -> int: ...
 
-    async def create_pipeline_run(self) -> str: ...
+    async def create_pipeline_run(self, trigger_type: str = "SCHEDULED") -> str: ...
 
     async def update_pipeline_run(self, run_id: str, result: PipelineRunResult) -> None: ...
 
@@ -41,10 +49,12 @@ class PersistenceRepository(Protocol):
     ) -> None: ...
 
     async def update_source_health(
-        self, source_id: str, status: str, consecutive_failures: int, error: str | None = None
+        self, source_id: str, is_success: bool, error: str | None = None
     ) -> None: ...
 
     def source_lock(self, source_id: str) -> AsyncContextManager[bool]: ...
+
+    async def refresh_analytics_views(self) -> None: ...
 
 
 class IngestionPipeline:
@@ -55,6 +65,15 @@ class IngestionPipeline:
 
     def __init__(self, repository: PersistenceRepository) -> None:
         self.repository = repository
+        self._enrichment_orchestrator = EnrichmentOrchestrator(
+            processors=[
+                EntityExtractor(),
+                SectorClassifier(),
+                SentimentEngine(),
+                KeywordExtractor(),
+                ExtractiveSummarizer(),
+            ]
+        )
 
     async def _fetch_with_concurrency(
         self, collectors: Sequence[AsyncCollector]
@@ -97,8 +116,8 @@ class IngestionPipeline:
         failed_sources: list[str] = []
 
         # Analyze transport success and locks
-        for source_id, result in results:
-            if result is None:
+        for source_id, collector_result in results:
+            if collector_result is None:
                 errors.append(f"Lock failed for {source_id}")
                 failed_sources.append(source_id)
                 registry.inc(
@@ -106,39 +125,33 @@ class IngestionPipeline:
                     labels={"source_slug": source_id, "error_type": "lock_failed"},
                 )
                 continue
-            if isinstance(result, BaseException):
-                errors.append(f"Transport crash for {source_id}: {str(result)}")
+            if isinstance(collector_result, BaseException):
+                errors.append(f"Transport crash for {source_id}: {str(collector_result)}")
                 failed_sources.append(source_id)
                 registry.inc(
                     "source_health_failures_total",
                     labels={"source_slug": source_id, "error_type": "exception"},
                 )
-                # We can't know consecutive_failures without reading DB, but we pass 1 to degraded for now
-                await self.repository.update_source_health(source_id, "DEGRADED", 1, "exception")
+                await self.repository.update_source_health(source_id, False, str(collector_result))
                 continue
-            if not result.is_success:
-                error_msg = result.error or "Unknown collector error"
+            if not collector_result.is_success:
+                error_msg = collector_result.error or "Unknown collector error"
                 errors.append(error_msg)
                 failed_sources.append(source_id)
 
-                health_status = "BLOCKED" if "403" in error_msg else "DEGRADED"
-                await self.repository.update_source_health(
-                    source_id, health_status, 1, "http_error"
-                )
+                await self.repository.update_source_health(source_id, False, error_msg)
                 registry.inc(
                     "source_health_failures_total",
                     labels={"source_slug": source_id, "error_type": "http_error"},
                 )
                 continue
 
-            raw_articles.extend(result.articles)
-            if not result.articles:
+            raw_articles.extend(collector_result.articles)
+            if not collector_result.articles:
                 # Zero article run
-                await self.repository.update_source_health(
-                    source_id, "DEGRADED", 1, "zero_articles"
-                )
+                await self.repository.update_source_health(source_id, False, "zero_articles")
             else:
-                await self.repository.update_source_health(source_id, "HEALTHY", 0, None)
+                await self.repository.update_source_health(source_id, True)
 
         total_fetched = len(raw_articles)
         log.info("collection_completed", total_fetched=total_fetched, error_count=len(errors))
@@ -251,12 +264,18 @@ class IngestionPipeline:
                 )
             else:
                 unique_articles.append(article)
+                
+        # 4b. Enrich ONLY the unique new articles
+        enriched_articles: list[EnrichedArticle] = []
+        for article in unique_articles:
+            enriched = await self._enrichment_orchestrator.enrich(article)
+            enriched_articles.append(enriched)
 
         # 5. Persist
         total_saved = 0
-        if unique_articles:
-            articles_by_source: dict[str, list[CanonicalArticle]] = {}
-            for article in unique_articles:
+        if enriched_articles:
+            articles_by_source: dict[str, list[EnrichedArticle]] = {}
+            for article in enriched_articles:
                 articles_by_source.setdefault(article.source_id, []).append(article)
 
             for source_id, group in articles_by_source.items():
@@ -273,26 +292,39 @@ class IngestionPipeline:
                     errors.append(f"Persistence failed for {source_id}: {str(e)}")
                     failed_sources.append(source_id)
 
-        status = PipelineRunStatus.COMPLETED
-        if errors:
-            status = (
-                PipelineRunStatus.FAILED
-                if total_saved == 0 and total_fetched > 0
-                else PipelineRunStatus.PARTIAL_SUCCESS
-            )
+        status = PipelineRunStatus.SUCCESS
+        # 5. Record Run Result
+        end_utc = datetime.now(timezone.utc)
+        duration_ms = int((end_utc - started_at).total_seconds() * 1000)
 
-        result_summary = PipelineRunResult(
+        if not errors and not failed_articles:
+            status = PipelineRunStatus.SUCCESS
+        elif len(normalized_counts) > 0:
+            status = PipelineRunStatus.PARTIAL_SUCCESS
+        else:
+            status = PipelineRunStatus.FAILED
+
+        error_summary = None
+        if errors or failed_articles:
+            err_texts = errors + [f"{f.failure_stage}: {f.error_type}" for f in failed_articles]
+            error_summary = "; ".join(err_texts[:10])
+
+        pipeline_result = PipelineRunResult(
             started_at=started_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=end_utc,
+            duration_ms=duration_ms,
+            articles_ingested=sum(normalized_counts.values()),
+            duplicates_detected=total_duplicates,
+            failures=len(failed_articles) + len(errors),
+            source_count=len(collectors),
             status=status,
-            inserted_count=total_saved,
-            duplicate_count=total_duplicates,
-            failed_sources=tuple(set(failed_sources)),
-            errors=tuple(errors),
+            trigger_type="UNKNOWN", # Should be passed, but let db handle default or we overwrite
+            error_summary=error_summary,
+            failed_sources=failed_sources,
         )
 
         try:
-            await self.repository.update_pipeline_run(run_id, result_summary)
+            await self.repository.update_pipeline_run(run_id, pipeline_result)
         except Exception as e:
             log.error("pipeline_run_persistence_failed", error=str(e))
 
@@ -301,11 +333,16 @@ class IngestionPipeline:
 
         log.info(
             "pipeline_finished",
-            status=result_summary.status.value,
+            status=pipeline_result.status.value,
             duration_sec=fetch_duration,
             total_fetched=total_fetched,
             total_saved=total_saved,
             total_duplicates=total_duplicates,
-            failed_sources=list(result_summary.failed_sources),
+            failed_sources=pipeline_result.failed_sources,
         )
-        return result_summary
+        try:
+            await self.repository.refresh_analytics_views()
+        except Exception as e:
+            log.error("analytics_views_refresh_failed", error=str(e))
+
+        return pipeline_result

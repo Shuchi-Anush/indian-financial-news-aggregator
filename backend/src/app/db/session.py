@@ -66,6 +66,12 @@ def get_engine() -> AsyncEngine:
         raise RuntimeError("Database engine not initialized. Call initialize_database() first.")
     return _engine
 
+def get_db_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Return the current async session factory."""
+    if _session_factory is None:
+        raise RuntimeError("Session factory not initialized. Call initialize_database() first.")
+    return _session_factory
+
 
 async def get_db() -> AsyncIterator[AsyncSession]:
     """Yield an async database session for FastAPI dependency injection.

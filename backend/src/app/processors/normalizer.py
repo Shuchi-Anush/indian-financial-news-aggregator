@@ -5,12 +5,11 @@ Ensures deterministic formatting of fields without side-effects or I/O.
 
 import html
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse, urlunparse
 
-from bs4 import BeautifulSoup
-
 import structlog
+from bs4 import BeautifulSoup
 
 from app.domain.articles import CanonicalArticle, RawArticle
 from app.processors.hashing import compute_content_hash

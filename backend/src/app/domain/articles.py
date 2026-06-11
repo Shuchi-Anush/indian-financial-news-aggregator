@@ -6,7 +6,7 @@ are free of any framework-specific or ORM dependencies.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -67,3 +67,35 @@ class CanonicalArticle:
     def is_complete(self) -> bool:
         """Evaluate whether essential metadata is present."""
         return bool(self.title and self.url and self.published_at)
+
+
+@dataclass(frozen=True)
+class EntityExtraction:
+    entity: str
+    entity_type: str
+    confidence: float
+    extractor_version: int
+
+
+@dataclass(frozen=True)
+class SectorClassification:
+    sector: str
+    score: float
+
+
+@dataclass(frozen=True)
+class KeywordExtraction:
+    keyword: str
+    weight: float
+
+
+@dataclass(frozen=True)
+class EnrichedArticle(CanonicalArticle):
+    """Immutable representation of an enriched article ready for persistence."""
+
+    entities: tuple[EntityExtraction, ...] = ()
+    sectors: tuple[SectorClassification, ...] = ()
+    keywords: tuple[KeywordExtraction, ...] = ()
+    sentiment_label: Optional[str] = None
+    sentiment_score: Optional[float] = None
+    generated_summary: Optional[str] = None

@@ -7,7 +7,6 @@ to guarantee accuracy across isolated script runs and docker containers.
 from sqlalchemy import func, select
 
 from app.db.session import get_session_factory
-from app.models.failed_article import FailedArticle
 from app.models.pipeline_run import PipelineRun
 
 
@@ -24,28 +23,36 @@ async def export_metrics() -> str:
 
         # Ingested and deduplicated
         stmt_sums = select(
-            func.sum(PipelineRun.inserted_count), func.sum(PipelineRun.duplicate_count)
+            func.sum(PipelineRun.articles_ingested),
+            func.sum(PipelineRun.duplicates_detected),
+            func.sum(PipelineRun.failures),
         )
         result_sums = await session.execute(stmt_sums)
-        inserted_sum, dedup_sum = result_sums.one()
+        inserted_sum, dedup_sum, failures_sum = result_sums.one()
         lines.append(f"articles_ingested_total {inserted_sum or 0}")
         lines.append(f"articles_deduplicated_total {dedup_sum or 0}")
-
-        # Failed articles
-        stmt_failed = select(func.count(FailedArticle.id))
-        failed_count = await session.scalar(stmt_failed) or 0
-        lines.append(f"articles_failed_total {failed_count}")
+        lines.append(f"articles_failed_total {failures_sum or 0}")
 
         # Run durations
         stmt_duration = select(
             func.count(PipelineRun.id),
-            func.sum(func.extract("epoch", PipelineRun.completed_at - PipelineRun.started_at)),
-        ).where(PipelineRun.completed_at.is_not(None))
+            func.sum(PipelineRun.duration_ms),
+        ).where(PipelineRun.duration_ms > 0)
         result_duration = await session.execute(stmt_duration)
-        duration_count, duration_sum = result_duration.one()
+        duration_count, duration_sum_ms = result_duration.one()
 
         lines.append(f"pipeline_run_duration_seconds_count {duration_count or 0}")
-        lines.append(f"pipeline_run_duration_seconds_sum {duration_sum or 0.0}")
+        lines.append(f"pipeline_run_duration_seconds_sum {(duration_sum_ms or 0) / 1000.0}")
+
+        # Source metrics
+        from app.models.feed_source import FeedSource
+
+        stmt_sources = select(FeedSource.circuit_breaker_state, func.count(FeedSource.id)).group_by(
+            FeedSource.circuit_breaker_state
+        )
+        source_states = await session.execute(stmt_sources)
+        for state, count in source_states:
+            lines.append(f'source_circuit_breaker_state_total{{state="{state.value}"}} {count}')
 
     return "\n".join(lines) + "\n"
 

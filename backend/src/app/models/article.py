@@ -14,13 +14,18 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, text
+from sqlalchemy import Computed, DateTime, ForeignKey, Index, String, Text, text, Float
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.feed_source import FeedSource
+    from app.models.article_entity import ArticleEntity
+    from app.models.article_sector import ArticleSector
+    from app.models.article_keyword import ArticleKeyword
 
 
 class ArticleCategory(enum.Enum):
@@ -67,6 +72,9 @@ class Article(TimestampMixin, Base):
         sentiment: Sentiment label (nullable — populated by future ML phase).
         feed_source_id: FK to the FeedSource this article was collected from.
         feed_source: Relationship back to the parent FeedSource.
+        sentiment_label: Sentiment classification.
+        sentiment_score: Numerical sentiment score (-1.0 to 1.0).
+        generated_summary: Extractive deterministic summary.
     """
 
     __tablename__ = "articles"
@@ -75,6 +83,12 @@ class Article(TimestampMixin, Base):
         Index("ix_articles_source_published", "feed_source_id", "published_at"),
         # Category index for filtered listing pages
         Index("ix_articles_category", "category"),
+        # Pagination index: fast keyset pagination
+        Index("ix_articles_published_id_desc", text("published_at DESC"), text("id DESC")),
+        # Source filtering index
+        Index("ix_articles_source_name_published", "source_name", text("published_at DESC")),
+        # Full-text search index
+        Index("ix_articles_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -107,21 +121,35 @@ class Article(TimestampMixin, Base):
         nullable=True, comment="Quality gate score 0.0-1.0"
     )
 
+    # --- Full Text Search ---
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('english', coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(body, ''))",
+            persisted=True,
+        ),
+    )
+
     # --- Classification fields (nullable — populated by processor / future ML) ---
     category: Mapped[ArticleCategory | None] = mapped_column(
         SAEnum(ArticleCategory, native_enum=False, create_constraint=False, length=32),
         nullable=True,
     )
-    sentiment: Mapped[SentimentLabel | None] = mapped_column(nullable=True)
+    sentiment: Mapped[SentimentLabel | None] = mapped_column(
+        SAEnum(SentimentLabel, native_enum=False, create_constraint=False, length=32),
+        nullable=True,
+    )
+    sentiment_label: Mapped[str | None] = mapped_column(String(50))
+    sentiment_score: Mapped[float | None] = mapped_column(Float)
+    generated_summary: Mapped[str | None] = mapped_column(Text)
 
     # --- Feed source FK ---
-    feed_source_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("feed_sources.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
+    feed_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("feed_sources.id", ondelete="CASCADE"), nullable=False
     )
 
     # --- Relationships ---
-    feed_source: Mapped["FeedSource | None"] = relationship(  # noqa: F821
-        back_populates="articles",
-    )
+    feed_source: Mapped["FeedSource"] = relationship("FeedSource", back_populates="articles")
+    entities: Mapped[list["ArticleEntity"]] = relationship("ArticleEntity", back_populates="article", cascade="all, delete-orphan")
+    sectors: Mapped[list["ArticleSector"]] = relationship("ArticleSector", back_populates="article", cascade="all, delete-orphan")
+    keywords: Mapped[list["ArticleKeyword"]] = relationship("ArticleKeyword", back_populates="article", cascade="all, delete-orphan")

@@ -1,6 +1,6 @@
 """URL normalization utilities."""
 
-from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 # Common tracking parameters to strip from URLs
 TRACKING_PARAMS = {

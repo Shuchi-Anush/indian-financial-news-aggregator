@@ -1,25 +1,31 @@
-"""ORM models package — re-exports all model classes.
+"""SQLAlchemy ORM models and enumerations.
 
-Import models here so that ``Base.metadata`` is aware of all tables when
-``create_all()`` is called during application startup.
+Provides the schema definition for all domain entities.
 """
 
 from app.models.article import Article, ArticleCategory, SentimentLabel
-from app.models.feed_source import FeedSource, SourceType, SourceHealth
-from app.models.pipeline_run import PipelineRun
-from app.models.raw_article import RawArticle, ProcessingStatus
 from app.models.failed_article import FailedArticle, FailureStage
+from app.models.feed_source import CircuitBreakerState, FeedSource, SourceType
+from app.models.pipeline_run import PipelineRun, PipelineRunStatus
+from app.models.raw_article import ProcessingStatus, RawArticle
+from app.models.article_entity import ArticleEntity
+from app.models.article_sector import ArticleSector
+from app.models.article_keyword import ArticleKeyword
 
 __all__ = [
     "Article",
     "ArticleCategory",
-    "FeedSource",
     "SentimentLabel",
+    "FeedSource",
     "SourceType",
-    "SourceHealth",
+    "CircuitBreakerState",
     "PipelineRun",
+    "PipelineRunStatus",
     "RawArticle",
     "ProcessingStatus",
     "FailedArticle",
     "FailureStage",
+    "ArticleEntity",
+    "ArticleSector",
+    "ArticleKeyword",
 ]

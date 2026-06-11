@@ -12,7 +12,7 @@ from app.core.env_loader import load_environment
 
 load_environment()
 
-from app.core.logging import setup_logging
+from app.core.logging import setup_logging  # noqa: E402
 
 # Configure structured logging before anything else
 setup_logging()
@@ -20,6 +20,7 @@ setup_logging()
 from fastapi import FastAPI  # noqa: E402
 from fastapi.responses import PlainTextResponse  # noqa: E402
 
+from app.api.routes import admin, analytics, articles, pipeline_runs, sources  # noqa: E402
 from app.core.exceptions import register_exception_handlers  # noqa: E402
 from app.core.middleware import register_middleware  # noqa: E402
 from app.core.startup import lifespan  # noqa: E402
@@ -36,6 +37,13 @@ register_middleware(app)
 
 # Wire exception handlers (domain errors → JSON responses)
 register_exception_handlers(app)
+
+# Register routers
+app.include_router(articles.router)
+app.include_router(analytics.router)
+app.include_router(admin.router)
+app.include_router(sources.router)
+app.include_router(pipeline_runs.router)
 
 
 @app.get("/health", tags=["system"])

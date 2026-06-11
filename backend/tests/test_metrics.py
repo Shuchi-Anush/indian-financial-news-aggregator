@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import sys
 from pathlib import Path
 backend_dir = Path(__file__).resolve().parents[2]
