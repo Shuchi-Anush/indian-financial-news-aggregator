@@ -120,7 +120,8 @@ def downgrade() -> None:
     op.alter_column('articles', 'sentiment',
                existing_type=sa.Enum('POSITIVE', 'NEGATIVE', 'NEUTRAL', name='sentimentlabel', native_enum=False, length=32),
                type_=postgresql.ENUM('POSITIVE', 'NEGATIVE', 'NEUTRAL', name='sentimentlabel'),
-               existing_nullable=True)
+               existing_nullable=True,
+               postgresql_using='sentiment::sentimentlabel')
     op.drop_column('articles', 'generated_summary')
     op.drop_column('articles', 'sentiment_score')
     op.drop_column('articles', 'sentiment_label')
