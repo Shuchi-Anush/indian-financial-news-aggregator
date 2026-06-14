@@ -19,6 +19,24 @@ class ArticleRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def bulk_insert_articles(self, articles: Sequence[dict[str, Any]]) -> int:
+        """
+        Bulk insert articles using PostgreSQL ON CONFLICT DO NOTHING.
+        Relies on the unique constraint on (url) or (content_hash) defined in the model.
+        Returns the number of rows actually inserted.
+        """
+        if not articles:
+            return 0
+
+        from sqlalchemy.dialects.postgresql import insert
+        
+        stmt = insert(Article).values(articles)
+        # Assuming URL is uniquely constrained. We do nothing on conflict.
+        stmt = stmt.on_conflict_do_nothing(index_elements=["url"])
+        
+        result = await self.session.execute(stmt)
+        return result.rowcount  # type: ignore[attr-defined]
+
     async def count_articles(self, filters: ArticleFilters) -> int:
         """Count articles matching the given filters."""
         stmt = select(func.count(Article.id))

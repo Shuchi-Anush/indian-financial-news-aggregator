@@ -67,7 +67,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
 
-        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        duration_sec = time.perf_counter() - start
+        duration_ms = round(duration_sec * 1000, 2)
         log.info(
             "request_completed",
             method=request.method,
@@ -75,6 +76,17 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             status=response.status_code,
             duration_ms=duration_ms,
         )
+
+        from app.core.metrics import HTTP_REQUEST_DURATION_SECONDS
+        
+        # Only record if it's an API route or specific endpoints (skip metrics/health to avoid noise)
+        if request.url.path not in ("/metrics", "/health", "/health/live", "/health/ready"):
+            HTTP_REQUEST_DURATION_SECONDS.labels(
+                method=request.method,
+                endpoint=request.url.path,
+                status_code=str(response.status_code)
+            ).observe(duration_sec)
+
         return response
 
 

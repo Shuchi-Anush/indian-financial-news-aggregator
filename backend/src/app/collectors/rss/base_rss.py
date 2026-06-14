@@ -76,14 +76,23 @@ class BaseRSSCollector(AsyncCollector):
                 feed_content = response.text
 
         except httpx.HTTPStatusError as e:
+            self._record_failure("http_status_error")
             return self._create_error_result(f"Permanent HTTP error: {e.response.status_code}")
+        except httpx.TimeoutException as e:
+            self._record_failure("timeout")
+            return self._create_error_result(f"Fetch timeout: {str(e)}")
         except Exception as e:
+            self._record_failure("unknown_fetch_error")
             return self._create_error_result(f"Fetch failed: {str(e)}")
 
         try:
+            # Prevent feedparser from hanging on giant payloads by limiting processing time?
+            # Feedparser is synchronous. If payload is massive, it might block. 
+            # We already rely on httpx timeout, but we should also catch bozo accurately.
             parsed_feed = feedparser.parse(feed_content)
 
             if parsed_feed.bozo and not parsed_feed.entries:
+                self._record_failure("malformed_xml")
                 return self._create_error_result(
                     f"Failed to parse feed: {getattr(parsed_feed, 'bozo_exception', 'Unknown')}"
                 )
@@ -94,11 +103,23 @@ class BaseRSSCollector(AsyncCollector):
                 if article:
                     raw_articles.append(article)
 
+            from app.core.metrics import ARTICLES_FETCHED_TOTAL
+            ARTICLES_FETCHED_TOTAL.inc(len(raw_articles))
+
             self.log.info("collector_fetch_success", articles_count=len(raw_articles))
             return self._create_success_result(tuple(raw_articles))
 
         except Exception as e:
+            self._record_failure("xml_parsing_exception")
             return self._create_error_result(f"Error parsing RSS feed: {str(e)}")
+
+    def _record_failure(self, error_type: str) -> None:
+        """Helper to increment Prometheus failure metrics."""
+        from app.core.metrics import SOURCE_HEALTH_FAILURES_TOTAL
+        SOURCE_HEALTH_FAILURES_TOTAL.labels(
+            source_slug=self.source_id,
+            error_type=error_type
+        ).inc()
 
     def _map_entry(self, entry: Any) -> Optional[RawArticle]:
         """

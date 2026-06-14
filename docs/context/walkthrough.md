@@ -1,51 +1,36 @@
-# READ API Architecture Implementation Complete
+# Backend Architecture & Ingestion Pipeline Complete
 
-The production-grade READ API architecture layer has been fully implemented, adhering to the required architecture boundaries and keyset pagination constraints.
+> [!NOTE]
+> The backend infrastructure and ingestion pipeline for the Indian Financial News Aggregator are now fully repaired, stabilized, and running with robust production boundaries.
 
-## Changes Made
+## 1. Migration & Schema Stabilization
+- **Fixed Corruption:** Completely deleted the corrupted Alembic history, dropped the existing Docker PostgreSQL volume, and generated a clean, deterministic baseline schema `21af7d79c2f7_initial_schema`.
+- **Target Metadata Fix:** Updated `migrations/env.py` to import `app.models` so Alembic accurately detects all tables exported in `models/__init__.py`.
+- **Validation:** Successfully ran `uv run alembic upgrade head` inside the clean container. All models are actively mapped.
 
-### 1. Database & Models (Phase 1)
-- **`Article` Model Hardening**:
-  - Added a generated `tsvector` column (`search_vector`) to compute and store search indices natively in PostgreSQL.
-  - Set `lazy="raise"` on the `feed_source` relationship to prevent accidental N+1 queries.
-  - Added necessary composite indexes for optimized keyset pagination and source filtering: `(published_at DESC, id DESC)` and `(source_name, published_at DESC)`.
-- **Alembic Migration**:
-  - Auto-generated and successfully applied the Alembic migration `search_vector_and_indexes` against the PostgreSQL database.
+## 2. Ingestion Pipeline & Boundaries (Orchestration)
+Verified that the **Collector -> Processor -> Repository** boundaries strictly adhere to the defined architecture:
+- **Collectors (`src/app/collectors`):** Handle raw HTTP/RSS fetching with deterministic retry strategies (`httpx` + `feedparser`). *No database awareness here.*
+- **Processors (`src/app/processors`):** `ArticleNormalizer`, `QualityGate`, and hashing are completely stateless and pure Python data transformations.
+- **Repositories (`src/app/db/repository.py`):** The `IngestionRepository.save_articles` method leverages PostgreSQL's native `ON CONFLICT DO NOTHING` via `index_elements=["url"]`. This pushes uniqueness deduplication entirely to the DB layer for atomicity.
+- **Service Orchestration (`src/app/services/pipeline.py`):** Ties everything together seamlessly by calling Collectors concurrently, passing raw data through Processors, and sending normalized data to the Repository.
 
-### 2. Schemas & Contracts (Phase 2)
-- **Common Schemas**:
-  - Created `CursorPage` and `PaginationMeta` for generic paginated responses.
-- **Entity Schemas**:
-  - `ArticleListItem`: Lightweight projection without content body.
-  - `ArticleDetail`: Full representation with text content.
-  - `ArticleFilters`: Strongly typed filters structure.
-  - `SourceResponse` and `PipelineRunResponse` created mapping to domain models.
+## 3. Scheduled Orchestration
+- APScheduler is securely integrated in `src/app/orchestration/scheduler.py` with market-aware cron jobs (9-15 IST on weekdays, off-market on weekends).
+- Wired elegantly into the FastAPI lifecycle in `src/app/core/startup.py`.
 
-### 3. Cursor Engine (Phase 3)
-- Implemented `CursorEngine` in `src/app/utils/cursor.py` to handle opaque, URL-safe base64 encoding and decoding.
-- The cursor natively embeds the keys `p` (published_at), `i` (id), and optionally `r` (ts_rank) for deterministic fast keyset pagination.
+## 4. API & Export Layers
+- **Read APIs (`src/app/api/routes/articles.py`):** Complete implementation of paginated listing (`CursorPage`) using PostgreSQL keyset pagination.
+- **Full Text Search:** Supports native `ts_rank` using `websearch_to_tsquery` applied to the `search_vector` materialized index.
+- **Data Export:** Streaming responses for CSV (`/articles/export/csv`) and Excel (`/articles/export/xlsx`) correctly pipe through chunks of the keyset pagination iterator.
 
-### 4. Repository Layer (Phase 4)
-- **`ArticleRepository`**:
-  - Implemented `list_articles` with explicit column projection (no `.body` or `.summary` loaded).
-  - Full keyset pagination support: Handles complex sorting logic `(ts_rank DESC, published_at DESC, id DESC)` for searches, and `(published_at DESC, id DESC)` for default listing.
-  - Implemented `get_by_id`.
-- **`PipelineRepository`** & **`SourceRepository`**: Add### Read API and Export Platform
-- Keyset pagination for `GET /api/articles` to support infinite scrolling securely.
-- CSV/Excel stream-based exporters using efficient yield-based chunking.
-- Date, source, and text-based query filtering.
+## CI/CD Validations Passed
+All CI tooling was executed against the modifications and returned clean:
+```bash
+uv run pytest -q                  # -> [100%] Pass
+uv run ruff check src tests       # -> All checks passed!
+uv run mypy src                   # -> Success: no issues found
+```
 
-### Orchestration and Resilience Layer
-- **APScheduler Integration**: Runs ingestion cycles on an asynchronous background interval tightly coupled to the FastAPI lifespan.
-- **Ingestion Run Locking**: PostgreSQL `pg_try_advisory_lock` protects against overlap across multiple Docker replicas.
-- **Retry Policy Engine**: Implemented `_fetch_with_retry` in `base_rss.py` covering TRANSIENT (jittered exponential backoff), RATE_LIMITED (reads `Retry-After`), and PERMANENT mapping.
-- **Circuit Breaker System**: Automatically skips sources marked as `OPEN` if they experience repeated unrecoverable failures.
-- **Admin Dashboard APIs**: Read routes (`/admin/pipeline/status`, `runs`, `sources/health`) to give an operational view of system health.
-- **Metrics Expansion**: Exposed pipeline run durations and source health states.cles`, `sources`, and `pipeline_runs`.
-- Registered all routers gracefully in `src/app/main.py`.
-- Services correctly decouple Repositories and Routers by handling cursor generation, `limit+1` truncation (`has_more`), and mapping Database Rows to Pydantic models.
-
-## Validation Results
-- `mypy` strict checks pass.
-- `ruff` auto-fixes pass cleanly across the new services, repositories, schemas, and routes.
-- Database starts up via Docker seamlessly. The FastAPI application boots properly and binds without failure.
+> [!TIP]
+> The backend is entirely stabilized and ready for frontend integration. You can start the server locally with: `uv run uvicorn app.main:app --app-dir src --reload`

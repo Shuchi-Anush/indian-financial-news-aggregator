@@ -32,6 +32,10 @@ async def initialize_database() -> None:
     _engine = create_async_engine(
         settings.effective_database_url,
         echo=(not settings.is_production),
+        pool_size=10,
+        max_overflow=5,
+        pool_timeout=30,
+        pool_recycle=1800,
         pool_pre_ping=True,
     )
     _session_factory = async_sessionmaker(

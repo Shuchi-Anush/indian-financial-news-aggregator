@@ -61,6 +61,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield
 
     stop_scheduler()
+    
+    # Wait for active ingestion to finish, max 15 seconds, then cancel
+    from app.orchestration.ingestion_jobs import graceful_shutdown
+    await graceful_shutdown(timeout_seconds=15.0)
+
     # Shutdown: release database connections
     await dispose_engine()
     log.info("application_shutdown")

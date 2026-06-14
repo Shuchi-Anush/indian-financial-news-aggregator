@@ -97,6 +97,11 @@ class ArticleNormalizer:
             return ""
         # Parse HTML safely
         soup = BeautifulSoup(text, "html.parser")
+        
+        # Remove script and style tags completely so their contents don't bleed into text
+        for script_or_style in soup(["script", "style", "noscript"]):
+            script_or_style.decompose()
+
         # Extract text (which decodes entities and drops tags)
         raw_text = soup.get_text(separator=" ")
         # Clean whitespace

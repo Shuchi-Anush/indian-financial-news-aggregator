@@ -1,103 +1,77 @@
-# Implementation Plan: Repository Maturity + Documentation Engineering
+# Phase 1: Repository & Implementation Audit
 
-This document outlines the systematic transformation of the Indian Financial News Aggregator repository into a production-grade, OSS-ready engineering project with elite documentation quality. The primary goal is to establish operational maturity, onboarding quality, architecture clarity, and AI-agent context systems.
+Before executing modifications, a complete repository inspection was performed targeting `src/app/*`, `docker-compose.yml`, and the `frontend` directories to determine the actual delta between the "stabilized prototype" and a "production-grade platform."
+
+## 1. Implementation-Grounded Findings
+
+### Observability & Operations (Phase 3 Gaps)
+- **Fake Metrics Registry:** `src/app/core/metrics.py` dynamically queries PostgreSQL to generate text-based Prometheus metrics on the fly (e.g., `select func.count(PipelineRun.id)`). It defines a `NoOpRegistry` that silently discards real-time telemetry (like `registry.inc("normalization_errors_total")` seen in `pipeline.py`).
+- **Missing API Observability:** There is no middleware tracking API response latency (`http_request_duration_seconds`) or status codes.
+- **Weak Health Probes:** `src/app/main.py` exposes a generic `/health` returning `{"status": "ok"}`. It does not separate liveness (`/health/live`) from readiness (`/health/ready`), nor does it actively ping the database or check scheduler thread health.
+
+### Feed Ingestion Resilience (Phase 2 Gaps)
+- **Metrics Isolation:** `base_rss.py` uses `httpx` with retries, but because the metrics registry is `NoOpRegistry`, source-level success/failure counts and ingestion latency are completely lost in real-time.
+- **Missing Circuit Breaker Sync:** The database tracks `CircuitBreakerState`, but there's no real-time metrics emission for alerting when a source trips OPEN.
+- **HTML Sanitization:** `normalizer.py` uses `BeautifulSoup(text, "html.parser").get_text()`, which strips HTML but doesn't sanitize rich text if we ever want to display HTML safely on the frontend.
+
+### Long Duration Stability (Phase 4 Gaps)
+- **Unbounded Connection Pools:** `src/app/db/session.py` calls `create_async_engine` without explicit `pool_size`, `max_overflow`, or `pool_timeout`. Under concurrent ingestion and API load, this risks connection starvation.
+- **Non-Graceful Scheduler Shutdown:** `src/app/orchestration/scheduler.py` uses `scheduler.shutdown(wait=False)` during FastAPI's lifespan teardown. This forcefully orphans running ingestion tasks, risking partial DB writes and zombie `PipelineRun` records left in a `RUNNING` state indefinitely.
+- **No Ingestion Backpressure:** Concurrency is hardcoded via `DEFAULT_PIPELINE_CONCURRENCY` (Semaphore), but memory bounds for massive RSS XML parsing are not enforced.
+
+### Frontend & Deployment (Phase 5 & 6 Gaps)
+- **Missing UI:** `frontend/streamlit/` exists but is empty/unimplemented.
+- **Deployment Topology:** `docker-compose.yml` lacks an Nginx reverse proxy layer, production environment handling, and centralized volume/logging definitions.
+
+---
 
 ## User Review Required
 
 > [!WARNING]
-> Please review the file structure mapping below. Once approved, I will sequentially generate and update all documentation files based on the actual implemented source code.
-> No runtime logic will be modified during this phase. All diagrams (Mermaid) will strictly reflect the current system architecture.
-
-## Proposed Changes
-
-We will execute the documentation generation in organized phases corresponding to your instructions.
-
-### Phase 1: Repository Audit
-(Already completed locally) Discovered existing files in `docs/`, `.agy/`, `.claude/`. We will integrate, replace, or prune these as needed to ensure zero duplication and strict alignment with actual implementation.
+> **Metrics Override:** I will replace the DB-query-based metrics in `metrics.py` with true `prometheus_client` memory registries. This means historical totals will drop from the `/metrics` endpoint unless backfilled, but real-time latency and throughput will become accurate.
+> 
+> **Shutdown Blocking:** Fixing the scheduler teardown will cause the FastAPI container to wait up to 15 seconds during shutdown to gracefully terminate ingestion jobs. 
+> 
+> **Do you approve of these strict operational overrides before I begin execution?**
 
 ---
 
-### Phase 2: Root Documentation
+## Execution Plan (Phases 2-7)
 
-#### [NEW/MODIFY] [README.md](file:///d:/indian-financial-news-aggregator/README.md)
-Will include platform overview, capability summary, tech stack, quickstart, API highlights, and production readiness statement.
+### Phase 2 — Feed Ingestion Hardening
+#### [MODIFY] `src/app/collectors/rss/base_rss.py`
+- Enhance `feedparser` error handling and enforce strict timeouts per feed.
+- Wire actual Prometheus metrics for latency and payload sizes.
 
-#### [NEW/MODIFY] [ROADMAP.md](file:///d:/indian-financial-news-aggregator/ROADMAP.md)
-Will separate roadmap into completed, in-progress, future, scalability, ML, and infra tracks based on current state.
+### Phase 3 — Observability & Operations
+#### [MODIFY] `src/app/core/metrics.py`
+- Strip `NoOpRegistry` and DB-querying logic. Implement `prometheus_client`.
+#### [MODIFY] `src/app/core/middleware.py` (New/Modify)
+- Add Prometheus request latency timing middleware.
+#### [MODIFY] `src/app/main.py`
+- Implement `/health/live` (process check) and `/health/ready` (DB ping via `get_engine().execute(text("SELECT 1"))`).
 
-#### [NEW/MODIFY] [CONTRIBUTING.md](file:///d:/indian-financial-news-aggregator/CONTRIBUTING.md)
-Will include strict coding standards, commit/branching conventions, testing expectations, and migration workflows.
+### Phase 4 — Long Duration Stability
+#### [MODIFY] `src/app/db/session.py`
+- Apply `pool_size=20`, `max_overflow=10`, `pool_timeout=30`, `pool_recycle=1800` to `create_async_engine`.
+#### [MODIFY] `src/app/orchestration/scheduler.py` & `src/app/core/startup.py`
+- Implement a graceful shutdown loop that waits for `_ingestion_lock` to clear before terminating.
 
-#### [NEW/MODIFY] [ARCHITECTURE.md](file:///d:/indian-financial-news-aggregator/ARCHITECTURE.md)
-Will consolidate deep architectural explanations of ingestion, orchestration, persistence, analytics, resilience systems, and DB strategy.
+### Phase 5 — Frontend Implementation
+#### [NEW] `frontend/streamlit/app.py` & `frontend/streamlit/requirements.txt`
+- Build a multi-page Streamlit dashboard (Dashboard, Article Explorer, Source Health).
+- Fetch data exclusively via the FastAPI `httpx` client.
 
----
+### Phase 6 — Deployment & Hosting
+#### [NEW] `infra/nginx/nginx.conf`
+#### [NEW] `docker-compose.prod.yml`
+- Define Nginx reverse proxy routing `/api` to backend and `/` to Streamlit.
 
-### Phase 3: Backend Documentation
-
-#### [MODIFY] [backend/README.md](file:///d:/indian-financial-news-aggregator/backend/README.md)
-Will serve as the core technical index for the backend. Will cover FastAPI lifecycle, async architecture, repository pattern, keyset pagination, materialized views, and known performance bottlenecks.
-
----
-
-### Phase 4: Operations Documentation
-
-#### [NEW] [docs/operations/DEPLOYMENT.md](file:///d:/indian-financial-news-aggregator/docs/operations/DEPLOYMENT.md)
-#### [NEW] [docs/operations/OPERATIONS.md](file:///d:/indian-financial-news-aggregator/docs/operations/OPERATIONS.md)
-#### [NEW] [docs/operations/MONITORING.md](file:///d:/indian-financial-news-aggregator/docs/operations/MONITORING.md)
-#### [NEW] [docs/operations/INCIDENT_RESPONSE.md](file:///d:/indian-financial-news-aggregator/docs/operations/INCIDENT_RESPONSE.md)
-#### [NEW] [docs/operations/BACKUP_AND_RECOVERY.md](file:///d:/indian-financial-news-aggregator/docs/operations/BACKUP_AND_RECOVERY.md)
-#### [NEW] [docs/operations/SCALING.md](file:///d:/indian-financial-news-aggregator/docs/operations/SCALING.md)
-#### [NEW] [docs/operations/SECURITY.md](file:///d:/indian-financial-news-aggregator/docs/operations/SECURITY.md)
-These files will offer real engineering guidance on Docker recovery, DB restarts, Prometheus metrics interpretation, and migration recovery.
-
----
-
-### Phase 5: Validation Documentation
-
-#### [NEW] [docs/validation/VALIDATION.md](file:///d:/indian-financial-news-aggregator/docs/validation/VALIDATION.md)
-#### [NEW] [docs/validation/CHAOS_TESTING.md](file:///d:/indian-financial-news-aggregator/docs/validation/CHAOS_TESTING.md)
-#### [NEW] [docs/validation/API_BRUTALIZATION.md](file:///d:/indian-financial-news-aggregator/docs/validation/API_BRUTALIZATION.md)
-#### [NEW] [docs/validation/DATABASE_VALIDATION.md](file:///d:/indian-financial-news-aggregator/docs/validation/DATABASE_VALIDATION.md)
-#### [NEW] [docs/validation/PERFORMANCE.md](file:///d:/indian-financial-news-aggregator/docs/validation/PERFORMANCE.md)
-These files will explain how the brutalization and chaos tests work, expected failure modes, and operational significance.
-
----
-
-### Phase 6: AI Agent Context Systems
-
-#### [NEW] [.agy/repository_rules.md](file:///d:/indian-financial-news-aggregator/.agy/repository_rules.md)
-#### [NEW] [.claude/architecture_context.md](file:///d:/indian-financial-news-aggregator/.claude/architecture_context.md)
-#### [NEW] [.claude/coding_principles.md](file:///d:/indian-financial-news-aggregator/.claude/coding_principles.md)
-#### [NEW] [.claude/operational_constraints.md](file:///d:/indian-financial-news-aggregator/.claude/operational_constraints.md)
-#### [NEW] [.claude/validation_rules.md](file:///d:/indian-financial-news-aggregator/.claude/validation_rules.md)
-#### [NEW] [.claude/async_patterns.md](file:///d:/indian-financial-news-aggregator/.claude/async_patterns.md)
-#### [NEW] [.claude/migration_rules.md](file:///d:/indian-financial-news-aggregator/.claude/migration_rules.md)
-Will encode deep architectural philosophy to keep future AI agents aligned with the codebase's strict standards.
-
----
-
-### Phase 7: Architecture Diagram Documentation
-
-#### [NEW] [docs/architecture/diagrams.md](file:///d:/indian-financial-news-aggregator/docs/architecture/diagrams.md)
-Will include Mermaid diagrams for ingestion flow, article lifecycle, enrichment lifecycle, scheduler lifecycle, and analytics refresh flow.
-
----
-
-### Phase 8: Frontend + Infra Preparation
-
-#### [NEW] [frontend/README.md](file:///d:/indian-financial-news-aggregator/frontend/README.md)
-#### [NEW] [infra/README.md](file:///d:/indian-financial-news-aggregator/infra/README.md)
-Will outline intended integration contracts, deployment expectations, and API interaction models.
-
----
-
-### Phase 9 & 10: Quality Pass & Final Validation
-After generating the docs, I will execute a thorough verification to ensure NO fake scalability claims or hallucinated features are present. I will generate a final audit report.
+### Phase 7 — Final Production Readiness Audit
+- Generate a conclusive `artifacts/production_audit_report.md` classifying architectural limits, scaling boundaries, and future migration paths.
 
 ## Verification Plan
-
-### Manual Verification
-- Review generated Mermaid diagrams for syntax errors.
-- Confirm that no existing backend logic or configuration was altered.
-- Provide the final documentation audit report detailing the exact changes and operational gaps remaining.
+After every phase:
+1. Run `uv sync --frozen`, `uv lock --check`, `uv run ruff check src tests`, `uv run mypy src`, `uv run pytest -q`.
+2. Spin up `docker compose up --build -d`.
+3. Validate `/health/ready` and `/metrics`.

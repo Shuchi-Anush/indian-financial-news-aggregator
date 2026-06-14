@@ -33,9 +33,7 @@ from app.core.env_loader import load_environment
 load_environment()
 
 from app.db.base import Base
-import app.models.article  # noqa: F401
-import app.models.feed_source  # noqa: F401
-import app.models.pipeline_run  # noqa: F401
+import app.models  # noqa: F401
 
 target_metadata = Base.metadata
 
