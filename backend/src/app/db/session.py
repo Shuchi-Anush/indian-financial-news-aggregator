@@ -30,7 +30,7 @@ async def initialize_database() -> None:
 
     settings = get_settings()
     _engine = create_async_engine(
-        settings.database_url,
+        settings.effective_database_url,
         echo=(not settings.is_production),
         pool_pre_ping=True,
     )

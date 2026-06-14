@@ -84,7 +84,7 @@ async def run_async_migrations() -> None:
 
     settings = get_settings()
     config_section = config.get_section(config.config_ini_section, {})
-    config_section["sqlalchemy.url"] = settings.database_url
+    config_section["sqlalchemy.url"] = settings.effective_database_url
 
     connectable = async_engine_from_config(
         config_section,

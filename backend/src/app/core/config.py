@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     postgres_user: str = "postgres"
     postgres_password: str = "postgres"
 
+    # Explicit DATABASE_URL override (set by CI, production, etc.)
+    database_url: str | None = None
+
     # --- Export ---
     export_dir: str = "exports"
 
@@ -51,8 +54,14 @@ class Settings(BaseSettings):
         return self.app_env == "production"
 
     @property
-    def database_url(self) -> str:
-        """Async PostgreSQL connection string for SQLAlchemy + asyncpg."""
+    def effective_database_url(self) -> str:
+        """Async PostgreSQL connection string for SQLAlchemy + asyncpg.
+
+        If DATABASE_URL is explicitly set (e.g. by CI or production),
+        use it directly. Otherwise construct from individual components.
+        """
+        if self.database_url is not None:
+            return self.database_url
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

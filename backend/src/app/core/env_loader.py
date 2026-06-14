@@ -38,14 +38,14 @@ def load_environment() -> None:
         env_file = search_dir / ".env.local"
 
     if env_file.exists():
-        # Load the base .env first for shared secrets
+        # Load the base .env first for shared secrets (never override runtime env)
         base_env = search_dir / ".env"
         if base_env.exists():
-            load_dotenv(base_env)
+            load_dotenv(base_env, override=False)
 
-        # Load the runtime specific overrides (override=True so they take precedence)
-        load_dotenv(env_file, override=True)
-        print(f"Loaded environment variables from {env_file.name}")
+        # Load runtime-specific file as defaults (never override runtime env)
+        load_dotenv(env_file, override=False)
+        print(f"Loaded environment defaults from {env_file.name}")
         os.environ["ENV_LOADED"] = "1"
     else:
         print(f"Warning: Environment file {env_file} not found.")
