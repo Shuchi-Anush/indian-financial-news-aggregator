@@ -1,0 +1,32 @@
+# Runtime and tooling caches
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Version control
+.git
+
+# IDE
+.vscode
+.idea
+
+# Not needed in production image
+tests
+docs
+scripts
+
+# Build artifacts
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+*.log
+
+# Config files not needed in image
+pytest.ini
+README.md

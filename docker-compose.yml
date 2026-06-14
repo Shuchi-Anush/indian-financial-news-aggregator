@@ -1,37 +1,38 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16.2-alpine3.19
     container_name: finnews-db
     restart: unless-stopped
     env_file:
       - .env.docker
-
     environment:
       POSTGRES_DB: financial_news
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-
     ports:
       - "5432:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d financial_news"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   backend:
     build:
       context: ./backend
-
+      dockerfile: Dockerfile
     container_name: finnews-backend
     restart: unless-stopped
-
     env_file:
       - .env.docker
-
     ports:
       - "8000:8000"
-
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
