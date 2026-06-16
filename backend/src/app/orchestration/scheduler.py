@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler # type: ignore
 from apscheduler.triggers.cron import CronTrigger # type: ignore
+from datetime import datetime, timedelta
 
 from app.orchestration.ingestion_jobs import run_ingestion_cycle
 
@@ -45,6 +46,15 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+    )
+
+    # Run once 10 seconds after startup for out-of-the-box ingestion
+    scheduler.add_job(
+        run_ingestion_cycle,
+        "date",
+        run_date=datetime.now(IST) + timedelta(seconds=10),
+        id="startup_ingestion",
+        replace_existing=True,
     )
 
     scheduler.start()

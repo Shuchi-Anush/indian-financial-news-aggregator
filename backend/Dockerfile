@@ -45,6 +45,9 @@ COPY --chown=appuser:appgroup src ./src
 COPY --chown=appuser:appgroup alembic.ini ./
 COPY --chown=appuser:appgroup migrations ./migrations
 
+COPY --chown=appuser:appgroup entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+
 # Drop root privileges
 USER appuser
 
@@ -53,4 +56,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "8000"]

@@ -8,6 +8,7 @@ from app.collectors.rss.cnbctv18 import CNBCTV18RSSCollector
 from app.collectors.rss.economictimes import EconomicTimesRSSCollector
 from app.collectors.rss.livemint import LiveMintRSSCollector
 from app.collectors.rss.moneycontrol import MoneycontrolRSSCollector
+from app.collectors.rss.sebi import SebiRSSCollector
 from app.db.repository import IngestionRepository
 from app.db.session import get_session_factory
 from app.domain.collectors import SourceMetadata
@@ -41,6 +42,8 @@ def _instantiate_collector(source_dict: dict):
         return LiveMintRSSCollector(meta)
     elif slug == "moneycontrol-markets":
         return MoneycontrolRSSCollector(meta)
+    elif slug == "sebi-press-releases":
+        return SebiRSSCollector(meta)
     return None
 
 
