@@ -13,8 +13,10 @@ class PipelineRunResponse(BaseModel):
     started_at: datetime
     completed_at: datetime | None = None
     status: PipelineRunStatus
-    inserted_count: int
-    duplicate_count: int
+    articles_ingested: int
+    duplicates_detected: int
+    failures: int
+    duration_ms: int
     failed_sources: list[str] | None = None
     errors: list[str] | None = None
 
