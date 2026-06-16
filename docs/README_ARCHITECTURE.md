@@ -1,130 +1,274 @@
-# System Architecture Walkthrough
+# System Design Document
 
-This document provides a deep architectural analysis of the Indian Financial News Aggregator. It serves as a systems-design case study, explaining the explicit engineering tradeoffs, the data lifecycle boundaries, and the reliability mechanisms that govern the platform.
+This document provides a rigorous architectural analysis of the Indian Financial News Aggregator. Designed as a system-design case study, it details the explicit engineering tradeoffs, data lifecycle boundaries, scalability limitations, and reliability mechanisms governing the platform in production environments.
 
-## 1. Architectural Goals
+---
 
-The platform was designed against the following constraints:
-- **Resilience**: The system must survive poisoned external payloads and unpredictable network conditions without halting.
-- **Idempotency**: The ingestion pipeline must be able to repeatedly process overlapping time windows without corrupting data or creating duplicates.
-- **Flat Latency**: The system must serve millions of records to API consumers with constant-time ($O(1)$) latency.
-- **Modularity**: The boundary between data fetching, normalization, and persistence must remain strictly decoupled.
+## Architectural Goals
 
-## 2. System Architecture
+1. **Absolute Idempotency**: The core ingestion engine must be able to repeatedly process overlapping, redundant data feeds without corrupting the persistence layer or generating duplicate state.
+2. **Asynchronous Isolation**: The ingestion of volatile external data must never block the event loop responsible for serving HTTP API requests.
+3. **Bounded Memory Execution**: Bulk operations—such as CSV extraction and full-text search indexing—must operate within strictly flat memory footprints to prevent container Out-Of-Memory (OOM) terminations.
+4. **Zero-Touch Bootstrap**: The system must autonomously transition from a cold start to a fully operational ingestion and serving state without manual database migrations or operational scripting.
 
-![System Architecture](assets/system_architecture.png)
+## Non-Goals
 
-### What does this component do?
-The overarching system orchestrates the complete lifecycle of financial news data—from raw external XML to normalized, searchable API payloads. It is deployed as a suite of Docker containers coordinated via Nginx.
+1. **Real-Time Streaming**: Sub-second websocket syndication of news is explicitly out of scope for the current architecture; 15-minute eventual consistency is the accepted SLA.
+2. **Deep Semantic Search**: Fuzzy matching, NLP-driven semantic search, and typo-tolerance are excluded in favor of exact-prefix matching to avoid deploying Elasticsearch.
+3. **Microservices Overhead**: The system will not adopt Kubernetes, Kafka, or gRPC until the monolithic architecture provably exhausts its vertical scaling limits.
 
-### Why does it exist?
-To decouple the erratic nature of network scraping from the high-availability requirements of API serving.
+## Constraints
 
-### How does it interact?
-Nginx acts as the edge boundary, routing consumer requests to the FastAPI backend or the operational dashboard. The backend independently interfaces with external RSS providers and the PostgreSQL persistence layer.
+- **Execution Topology**: The scheduler and the API operate within the same Python memory space and event loop.
+- **Compute Overhead**: Machine learning pipelines (NER, Sentiment Analysis) are restricted, as heavy CPU-bound synchronous tasks will starve the asyncio event loop and degrade API latency.
 
-## 3. Runtime Architecture
+## Architecture Drivers
 
-![Backend Runtime](assets/backend_runtime.png)
+The architecture is driven by the hostility of the external internet. Financial RSS feeds suffer from frequent timeouts, undocumented schema changes, malformed XML, and unpredictable Cloudflare bot-challenges. The architecture must treat external data as inherently poisonous and wrap it in rigid, isolated boundaries.
 
-### What does this component do?
-The backend runtime consolidates asynchronous API request serving (Uvicorn) and background job orchestration (`APScheduler`) within a single, unified Python process.
+---
 
-### Why does it exist?
-To minimize deployment complexity during the initial rollout. By embedding the scheduler within the ASGI event loop, we avoided the operational burden of standing up dedicated Celery workers and Redis brokers.
+## System Architecture
 
-### What tradeoffs were made?
-Embedding the scheduler prevents horizontal scaling of the ingestion tier. If multiple backend containers are deployed currently, they will redundantly execute the same fetching jobs.
+![System Architecture](../docs/assets/system_architecture.png)
 
-## 4. Ingestion Pipeline
+The system deploys as a containerized monolith utilizing Docker Compose. 
 
-![Pipeline Flow](assets/pipeline_flow.png)
+### Edge Boundary (Nginx)
+Nginx acts as the reverse proxy and first line of defense. It routes traffic securely, terminates TLS (in production), enforces rate limiting, and maps `/api` paths to the FastAPI backend while serving the operational dashboard on the root path.
 
-### What does this component do?
-The pipeline represents the strict linear progression of data. It ensures that raw payloads are explicitly fetched, normalized, mapped to canonical schemas, and deterministically enriched.
+### Backend Execution (FastAPI)
+The FastAPI container houses the application logic. It operates in two simultaneous capacities:
+1. **API Worker**: Uvicorn processes listening for incoming TCP connections.
+2. **Background Orchestrator**: The APScheduler thread initiating outbound network requests.
 
-### Why does it exist?
-Without an explicit pipeline, parsing logic inevitably bleeds into persistence logic. This strict flow ensures that the database only ever receives validated, well-formed entities.
+### Persistence Engine (PostgreSQL)
+PostgreSQL is the singular source of truth. It manages relational data, executes full-text search indexing via GIN, enforces uniqueness constraints via hash algorithms, and pre-computes complex analytics via materialized views.
 
-## 5. Orchestration Model
+---
 
-![Orchestration Pipeline](assets/orchestration_pipeline.png)
+## End-to-End Data Lifecycle
 
-### What does this component do?
-The `PipelineOrchestrationService` acts as the transaction coordinator. It triggers the `RSSCollector`, iterates through the raw payloads, invokes the normalization logic, and initiates the database session.
+![Pipeline Flow](../docs/assets/pipeline_flow.png)
 
-### How does it interact?
-It sits above the repositories and collectors. It is the only component that dictates when an SQLAlchemy `AsyncSession` commits or rolls back, ensuring atomic logging of pipeline telemetry alongside the data payload.
+The journey of an article follows strict immutability principles:
 
-## 6. Persistence Architecture
+1. **Collection**: Raw XML payloads are fetched from external endpoints into memory.
+2. **Normalization**: The XML tree is parsed. HTML entities in descriptions are sanitized to prevent XSS and normalize search text. Timezones are localized and forced to UTC. The data is mapped to a strictly-typed Pydantic DTO (`RawArticle`).
+3. **Deduplication Hashing**: A deterministic SHA-256 hash is computed based on the canonical URL and core content.
+4. **Enrichment**: Configurable heuristics scan the text to attach sector labels (e.g., "Technology") and flag named entities.
+5. **Persistence**: The asynchronous repository opens a transaction and upserts the payload to PostgreSQL, relying on the hash to reject duplicates.
+6. **Analytics Hook**: Post-commit hooks trigger the database to refresh materialized views.
+7. **API Serving**: The normalized payload is serialized to JSON and served to consumers via keyset paginated HTTP routes.
 
-![Persistence Flow](assets/persistence_flow.png)
+---
 
-### What does this component do?
-The persistence architecture mandates how data physically lands on disk. It handles batching, async session management, and primary collision avoidance.
+## RSS Source Strategy
 
-### Why does it exist?
-To prevent database connection starvation and guarantee idempotency. By relying on native PostgreSQL `UPSERT` capabilities, the application avoids memory-heavy "read-before-write" existence checks.
+The platform does not rely on a monolithic stream. It maintains a dictionary of targeted sources.
 
-## 7. Database Design
+- **Source Selection**: Curated list of high-signal Indian publishers (Moneycontrol, Economic Times, LiveMint, Business Standard).
+- **Validation**: Sources are polled for XML integrity. Feeds lacking functional `guid` or `pubDate` fields are rejected at the source configuration level.
+- **Reliability Tracking**: The database tracks consecutive failures per source, providing telemetry on publisher uptime and API volatility.
 
-![Database Schema](assets/database_schema.png)
+---
 
-### What does this component do?
-The schema organizes the data layer into relational, highly indexed tables (`feed_sources`, `articles`, `pipeline_runs`).
+## Ingestion Design
 
-### What tradeoffs were made?
-The `articles` table maintains a `tsvector` column. While this increases storage bloat and lightly impacts write speeds, it removes the immense operational complexity of syncing the database state with an external search engine like Elasticsearch.
+Ingestion is fundamentally asynchronous and network-bound. Utilizing `httpx.AsyncClient`, the system fires concurrent requests to all active RSS sources. 
 
-## 8. Data Lifecycle
+This concurrency is heavily bounded. A semaphore restricts simultaneous outbound connections to prevent IP bans or file-descriptor exhaustion. The `feedparser` library executes the actual XML parsing; because `feedparser` is a blocking, CPU-bound library, it is executed via `asyncio.to_thread()` to prevent starving the FastAPI event loop during massive payload deserialization.
 
-The lifecycle of an article follows strict immutability principles:
-1. **Raw**: Unstructured XML fetched via HTTP.
-2. **Parsed**: Unclean string data mapped to a Pydantic DTO.
-3. **Canonical**: Timestamps coerced to UTC, HTML tags stripped, text normalized.
-4. **Persistent**: Cryptographic hash generated; stored durably in PostgreSQL.
-5. **Served**: Queried via keyset pagination; serialized to JSON over HTTP.
+---
 
-## 9. Reliability Mechanisms
+## Scheduler Design
 
-The platform ensures reliability through isolated failure domains. 
-If an RSS endpoint is unreachable, the HTTP client throws an exception. This exception is caught locally within the specific feed's ingestion loop. The failure is recorded in the pipeline telemetry, the internal circuit breaker increments its failure count, and the orchestrator seamlessly moves to the next feed source. The API worker remains completely unaffected.
+![Orchestration Pipeline](../docs/assets/orchestration_pipeline.png)
 
-## 10. Deduplication Design
+The `PipelineOrchestrationService` manages the scheduler. The system embeds `APScheduler` inside the Uvicorn worker.
 
-Deduplication logic is offloaded to the database engine.
-A SHA-256 hash (`content_hash`) is generated prior to insertion. We execute an `INSERT INTO ... ON CONFLICT (content_hash) DO NOTHING` statement. 
-*Why?* Scraping schedules frequently overlap. Instead of pulling 10,000 URLs into backend RAM to check for duplicates, the database engine enforces the constraint at the disk level in fractions of a millisecond.
+It operates on a strictly interval-based cron tick. Concurrency controls (`max_instances=1`) guarantee that a delayed ingestion cycle will not overlap with the subsequent scheduled cycle. The orchestrator acts as the ultimate transaction boundary—it dictates when a database session begins, commits, or rolls back based on the holistic success of the feed collection.
 
-## 11. Analytics Layer
+---
 
-Analytics computation utilizes PostgreSQL **Materialized Views**.
-Instead of running expensive `GROUP BY` aggregates on the live `articles` table on every API request, the system computes these metrics in the background. The FastAPI endpoint simply reads the pre-computed view, ensuring constant-time serving latency.
+## Deduplication Design
 
-## 12. Export Architecture
+Deduplication logic is offloaded entirely to the storage engine. 
 
-To support massive data extraction without triggering Out-Of-Memory (OOM) killer terminations, the export subsystem streams the data. It utilizes server-side cursors in PostgreSQL to fetch chunks of records, format them into CSV rows, and yield them via FastAPI's `StreamingResponse` directly to the TCP socket.
+Attempting application-level deduplication (e.g., querying the database with `SELECT id FROM articles WHERE url IN (...)`) requires holding thousands of URLs in memory, executing expensive index scans, and manually filtering payloads before insert. It is highly susceptible to race conditions if two worker threads process the same feed simultaneously.
 
-## 13. Scalability Analysis
+Instead, the pipeline generates a `content_hash`. The PostgreSQL schema enforces a `UNIQUE` constraint on this column. 
+The system executes a bulk `INSERT INTO ... ON CONFLICT (content_hash) DO NOTHING`. 
+The PostgreSQL C engine resolves hash index collisions in microseconds, guaranteeing 100% idempotency with zero application-side race conditions.
 
-- **API Serving**: The backend is completely stateless. It can be replicated indefinitely behind an Nginx load balancer to handle arbitrary read traffic.
-- **Database**: PostgreSQL can handle tens of thousands of concurrent reads, particularly given the aggressive use of indexes and keyset pagination.
-- **Ingestion**: The embedded scheduler limits the ingestion tier to a single node.
+---
 
-## 14. Bottlenecks
+## Persistence Design
 
-1. **Embedded Scheduler**: Restricts horizontal scaling.
-2. **Text Search**: PostgreSQL `tsvector` is fast, but lacks fuzzy matching and semantic understanding compared to Lucene-based indexes.
-3. **Memory Buffering**: Extreme edge cases where a single RSS feed payload exceeds 500MB could spike worker RAM during XML parsing.
+![Persistence Flow](../docs/assets/persistence_flow.png)
 
-## 15. Future Evolution
+The persistence layer strictly adheres to the Unit of Work and Repository patterns.
 
-The architectural roadmap dictates two necessary evolutions to achieve hyper-scale:
-1. **Transition to Distributed Queues**: Ripping out the embedded `APScheduler` and placing fetch payloads onto a Redis-backed Celery cluster.
-2. **Presentation Decoupling**: Deprecating the Streamlit operational dashboard in favor of a statically generated Next.js application, shifting the rendering burden entirely to the client edge.
+- **`articles`**: The canonical storage table. Highly indexed for time-series and full-text search.
+- **`feed_sources`**: The configuration table driving the ingestion loop.
+- **`pipeline_runs`**: The operational telemetry table. Records the start time, end time, duration, and article yield of every scheduler execution. 
 
-## 16. Architectural Tradeoffs
+If a batch of articles fails to insert (due to a database disconnect), the `pipeline_runs` entry is rolled back alongside the articles, ensuring the telemetry remains perfectly synchronized with actual disk state.
 
-**Consistency over Speed**: We strictly wait for database commits before acknowledging pipeline successes. If a crash occurs mid-write, the transaction is rolled back entirely, preventing phantom states.
+---
 
-**PostgreSQL over NoSQL**: While Document stores (MongoDB) easily digest varying XML schemas, we enforced rigid relational schemas. This forces data cleanup to happen at the ingestion boundary, ensuring the API layer never has to parse unstructured data.
+## Database Design
+
+![Database Schema](../docs/assets/database_schema.png)
+
+The schema rationale prioritizes high-throughput inserts and immutable history. Soft deletes are avoided in favor of strict retention policies. The `search_vector` column is explicitly decoupled from the text columns to allow customized trigger-based text weighting in the future.
+
+---
+
+## Search Design
+
+Search functionality avoids the operational overhead of deploying Elasticsearch. The `articles` table maintains a `tsvector` column (`search_vector`) updated via SQLAlchemy triggers upon insert. 
+
+When a user queries the API, the backend constructs a `to_tsquery` execution plan. PostgreSQL utilizes a Generalized Inverted Index (GIN) to locate records. To paginate through massive result sets without performance degradation, the API requires zero-offset keyset pagination (cursor-based), explicitly rejecting `LIMIT/OFFSET` anti-patterns.
+
+---
+
+## Analytics Design
+
+Running aggregate `COUNT` and `GROUP BY` operations across the article table to calculate trending sectors is computationally prohibitive. 
+
+The system leverages PostgreSQL **Materialized Views** (e.g., `hourly_trends_mv`). These views pre-aggregate complex metrics into physical tables. When the API requests trending data, it queries the view directly ($O(1)$ latency). The orchestration service triggers a `REFRESH MATERIALIZED VIEW CONCURRENTLY` in the background, ensuring analytics remain fresh without blocking concurrent read traffic.
+
+---
+
+## Export Design
+
+Financial researchers require bulk data access. The `GET /api/articles/export/csv` route implements an async `StreamingResponse`. 
+
+Rather than loading the dataset into RAM, the backend opens a server-side PostgreSQL cursor. It fetches data in chunks of 1,000, formats them as CSV rows, and yields them over the HTTP socket. This bounded stream prevents memory exhaustion (OOM crashes), allowing a 1GB API container to safely generate and transmit a 50GB CSV file.
+
+---
+
+## Failure Scenarios
+
+The system's resilience is defined by its response to failure.
+
+### 1. Malformed RSS XML
+- **Detection**: `feedparser` throws an exception or returns a fundamentally broken dictionary missing mandatory fields (URL, Title).
+- **Impact**: Isolated to the specific article.
+- **Mitigation**: Quality gates drop the invalid payload. A `dropped_malformed_article` metric is incremented. The pipeline continues.
+- **Residual Risk**: A publisher completely changing their schema will result in 100% dropped articles for that source until the parsing heuristics are updated.
+
+### 2. HTTP 403 (Anti-Bot)
+- **Detection**: `httpx` returns a 403 status code.
+- **Impact**: The specific feed fails collection.
+- **Mitigation**: The internal circuit breaker logs the failure. Repeated failures trip the breaker, applying exponential backoff to the source.
+- **Residual Risk**: Publisher IP-blocks require manual proxy routing or User-Agent rotation.
+
+### 3. Feed Timeout
+- **Detection**: `httpx` exceeds the strict 10-second read timeout.
+- **Impact**: Collection hangs temporarily.
+- **Mitigation**: Timeouts are aggressively enforced. The feed fails, the breaker increments, and the orchestrator moves on.
+- **Residual Risk**: None. Strict timeouts prevent the ingestion thread from hanging indefinitely.
+
+### 4. Duplicate Articles
+- **Detection**: The database hash index detects a collision on `content_hash`.
+- **Impact**: None.
+- **Mitigation**: Handled natively via `ON CONFLICT DO NOTHING`.
+- **Residual Risk**: If a publisher subtly modifies an article (changing the hash), the system ingests it as a new distinct article.
+
+### 5. Scheduler Crash
+- **Detection**: Prometheus telemetry (`time_since_last_successful_run`) exceeds thresholds.
+- **Impact**: New articles cease flowing into the database.
+- **Mitigation**: Kubernetes/Docker restarts the unhealthy container based on `/health` endpoint staleness.
+- **Residual Risk**: Data freshness gap during the downtime window.
+
+### 6. Database Outage
+- **Detection**: SQLAlchemy raises `ConnectionRefusedError`.
+- **Impact**: API requests fail (500). Ingestion cycles fail.
+- **Mitigation**: `pool_pre_ping` attempts to reconnect. The API and scheduler will crash repeatedly until the database recovers, ensuring no data is acknowledged as saved when it isn't.
+- **Residual Risk**: Hard dependency on PostgreSQL uptime.
+
+### 7. Restart During Ingestion
+- **Detection**: SIGTERM received mid-batch insert.
+- **Impact**: The current transaction is severed.
+- **Mitigation**: Database rolls back the incomplete batch. Upon restart, the scheduler re-fetches the feed, safely idempotently inserting the data.
+- **Residual Risk**: None. Transactions guarantee atomic safety.
+
+### 8. Materialized View Failure
+- **Detection**: The `REFRESH` SQL command fails (e.g., due to deadlock).
+- **Impact**: Analytics dashboards display stale data.
+- **Mitigation**: The API continues serving the previously materialized state. The next ingestion cycle will re-attempt the refresh.
+- **Residual Risk**: Temporary metric drift.
+
+---
+
+## Scalability Analysis
+
+### Current Limits
+- **Ingestion Throughput**: Network bound. Can realistically process ~500 RSS feeds every 15 minutes on a single CPU core.
+- **Storage Limits**: Bounded only by PostgreSQL disk capacity.
+- **Serving Limits**: Bounded by ASGI concurrency. Easily handles thousands of requests per second due to keyset pagination.
+
+### Future Limits & Bottlenecks
+- **The Embedded Scheduler**: Because `APScheduler` is embedded, deploying a second FastAPI container to scale API traffic will result in the second container *also* attempting to fetch RSS feeds. While advisory locks mitigate this, the architecture prevents explicitly scaling the ingestion tier out to multiple nodes.
+
+---
+
+## Alternative Architectures Considered
+
+### ADR-001: PostgreSQL Search vs Elasticsearch
+- **Context**: The platform requires fast full-text search across millions of news articles.
+- **Decision**: Utilize PostgreSQL `tsvector` and GIN indexing natively.
+- **Rationale**: Adding Elasticsearch requires massive RAM overhead, JVM tuning, and a complex CDC (Change Data Capture) pipeline to keep the search index in sync with the relational database.
+- **Tradeoffs**: PostgreSQL search lacks deep linguistic capabilities, fuzzy matching, and typo-tolerance.
+- **Consequences**: Substantially reduced infrastructure footprint and operational overhead, at the cost of less "intelligent" search query parsing.
+
+### ADR-002: Embedded APScheduler vs Celery
+- **Context**: The platform requires recurring background tasks to execute ingestion.
+- **Decision**: Embed `APScheduler` directly inside the FastAPI ASGI event loop.
+- **Rationale**: Celery requires a message broker (Redis/RabbitMQ) and separate worker containers. For a v1 deployment focused on validation, this added unacceptable operational complexity.
+- **Tradeoffs**: We lose horizontal scalability of the ingestion tier and the ability to easily distribute retries across nodes.
+- **Consequences**: Ingestion is locked to a single node.
+
+### ADR-003: Monolith vs Microservices
+- **Context**: The platform executes distinct domains: Fetching, Serving, Analytics.
+- **Decision**: Deploy as a single monolithic Python repository and container.
+- **Rationale**: Microservices introduce extreme complexity (network partitions, distributed tracing, complex CI/CD). The team size and project scope did not justify this boundary.
+- **Tradeoffs**: A massive CPU spike during XML parsing could theoretically degrade API response times.
+- **Consequences**: Faster development velocity and trivial deployment topology.
+
+### ADR-004: Materialized Views vs External Analytics Store
+- **Context**: The dashboard requires high-speed aggregated trending metrics.
+- **Decision**: Pre-calculate aggregates using PostgreSQL Materialized Views.
+- **Rationale**: Standing up an OLAP database (ClickHouse) or a Redis cache introduces dual-write complexities.
+- **Tradeoffs**: Data is slightly stale (refreshed periodically) rather than strictly real-time.
+- **Consequences**: Kept the architecture strictly within a single storage engine.
+
+### ADR-005: Streamlit vs Next.js
+- **Context**: Backend engineers needed to validate the data pipeline visually.
+- **Decision**: Deploy Streamlit as a temporary operational layer.
+- **Rationale**: Streamlit allows Python engineers to build tables and charts instantly without touching Javascript or managing a Node.js build chain.
+- **Tradeoffs**: Unacceptable for consumer-facing traffic (no SEO, high latency, poor mobile responsiveness).
+- **Consequences**: Streamlit acts solely as internal validation tooling; Next.js is designated as the future production presentation layer.
+
+---
+
+## Technical Debt
+
+- **Synchronous Enrichment**: Entity extraction heuristics currently run inline during the ingestion loop. This is acceptable for simple regex operations, but prevents the integration of heavy Machine Learning models (like Transformers for Sentiment Analysis), which would block the event loop.
+  - *Mitigation Strategy*: Will be resolved alongside the Celery migration.
+- **Advisory Locks**: The multi-container scaling mitigation relies on a hardcoded PostgreSQL advisory lock. This is a brittle mechanism prone to session hanging under extreme edge cases.
+  - *Why Accepted*: Preferable to deploying a distributed locking mechanism like Redis Redlock for the current scale.
+
+---
+
+## Future Architecture
+
+![Runtime Architecture](../docs/assets/backend_runtime.png)
+
+The architectural end-state roadmap involves decoupling the monolith into targeted execution domains:
+
+1. **Decoupled Orchestration**: Replacing `APScheduler` with a Redis-backed distributed task queue. FastAPI will serve exclusively as the HTTP boundary. Ingestion jobs will be picked up by independent worker nodes, allowing infinite horizontal scaling.
+2. **Event-Driven ML Enrichment**: Introducing a Kafka/PubSub topic. Once an article lands in PostgreSQL, an event will trigger asynchronous ML workers to perform Named Entity Recognition and update the database retroactively.
+3. **Edge Presentation**: Deprecating the Streamlit container entirely in favor of a statically generated Next.js application served via Vercel or an edge CDN, shifting the rendering burden completely off the internal network.
