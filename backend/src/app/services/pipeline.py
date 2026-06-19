@@ -228,6 +228,7 @@ class IngestionPipeline:
                 title=canonical.title,
                 url=canonical.url,
                 source_id=canonical.source_id,
+                source_name=canonical.source_name,
                 content_hash=canonical.content_hash,
                 collected_at=canonical.collected_at,
                 content=canonical.content,

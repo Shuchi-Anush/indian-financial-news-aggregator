@@ -32,6 +32,7 @@ class RawArticle:
     title: str
     url: str
     source_id: str
+    source_name: str
     timezone_hint: str = "UTC"
     content: Optional[str] = None
     summary: Optional[str] = None
@@ -53,6 +54,7 @@ class CanonicalArticle:
     title: str
     url: str
     source_id: str
+    source_name: str
     content_hash: str
     collected_at: datetime
     content: Optional[str] = None

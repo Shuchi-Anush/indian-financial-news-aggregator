@@ -68,6 +68,7 @@ class ArticleNormalizer:
                 title=clean_title,
                 url=clean_url,
                 source_id=article.source_id,
+                source_name=article.source_name,
                 content_hash=content_hash,
                 content=clean_content,
                 summary=clean_summary,

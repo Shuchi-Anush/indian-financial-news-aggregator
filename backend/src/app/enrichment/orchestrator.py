@@ -66,6 +66,7 @@ class EnrichmentOrchestrator:
             title=context.article.title,
             url=context.article.url,
             source_id=context.article.source_id,
+            source_name=context.article.source_name,
             content_hash=context.article.content_hash,
             collected_at=context.article.collected_at,
             content=context.article.content,

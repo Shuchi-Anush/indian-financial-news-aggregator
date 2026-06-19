@@ -148,6 +148,7 @@ class BaseRSSCollector(AsyncCollector):
                 title=title,
                 url=clean_url,
                 source_id=self.source_id,
+                source_name=self.metadata.name,
                 timezone_hint=self.metadata.timezone_hint,
                 content=None,
                 summary=summary,

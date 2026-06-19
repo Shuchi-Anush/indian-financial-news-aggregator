@@ -67,6 +67,7 @@ class IngestionRepository(PersistenceRepository):
                 "title": a.title,
                 "url": a.url,
                 "feed_source_id": uuid.UUID(a.source_id) if a.source_id else None,
+                "source_name": a.source_name,
                 "content_hash": a.content_hash,
                 "summary": a.summary,
                 "body": a.content,
