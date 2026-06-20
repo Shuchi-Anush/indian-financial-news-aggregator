@@ -3,12 +3,7 @@ import asyncio
 import structlog
 
 # Import our collectors
-from app.collectors.rss.businessstandard import BusinessStandardRSSCollector
-from app.collectors.rss.cnbctv18 import CNBCTV18RSSCollector
-from app.collectors.rss.economictimes import EconomicTimesRSSCollector
-from app.collectors.rss.livemint import LiveMintRSSCollector
-from app.collectors.rss.moneycontrol import MoneycontrolRSSCollector
-from app.collectors.rss.sebi import SebiRSSCollector
+from app.collectors.rss.base_rss import BaseRSSCollector
 from app.db.repository import IngestionRepository
 from app.db.session import get_session_factory
 from app.domain.collectors import SourceMetadata
@@ -24,7 +19,6 @@ _active_ingestion_task: asyncio.Task | None = None
 
 
 def _instantiate_collector(source_dict: dict):
-    slug = source_dict["slug"]
     meta = SourceMetadata(
         source_id=source_dict["id"],
         name=source_dict["name"],
@@ -32,18 +26,11 @@ def _instantiate_collector(source_dict: dict):
         source_type=source_dict["source_type"].value,
         timezone_hint=source_dict["timezone_hint"],
     )
-    if slug == "business-standard-markets":
-        return BusinessStandardRSSCollector(meta)
-    elif slug == "cnbc-tv18-markets":
-        return CNBCTV18RSSCollector(meta)
-    elif slug == "economic-times-markets":
-        return EconomicTimesRSSCollector(meta)
-    elif slug == "livemint-markets":
-        return LiveMintRSSCollector(meta)
-    elif slug == "moneycontrol-markets":
-        return MoneycontrolRSSCollector(meta)
-    elif slug == "sebi-press-releases":
-        return SebiRSSCollector(meta)
+    
+    if meta.source_type == "rss":
+        return BaseRSSCollector(meta)
+        
+    log.warning("unsupported_source_type_for_collector_factory", slug=source_dict["slug"], source_type=meta.source_type)
     return None
 
 
