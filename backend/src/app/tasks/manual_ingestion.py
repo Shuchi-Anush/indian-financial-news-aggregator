@@ -17,11 +17,7 @@ load_environment()
 
 import structlog
 
-from app.collectors.rss.businessstandard import BusinessStandardRSSCollector
-from app.collectors.rss.cnbctv18 import CNBCTV18RSSCollector
-from app.collectors.rss.economictimes import EconomicTimesRSSCollector
-from app.collectors.rss.livemint import LiveMintRSSCollector
-from app.collectors.rss.moneycontrol import MoneycontrolRSSCollector
+from app.collectors.rss.base_rss import BaseRSSCollector
 from app.core.logging import setup_logging
 from app.db.repository import IngestionRepository
 from app.db.session import dispose_engine, get_session_factory, initialize_database
@@ -34,27 +30,27 @@ FEEDS_CONFIG = [
     {
         "name": "Moneycontrol Markets",
         "url": "https://www.moneycontrol.com/rss/MCtopnews.xml",
-        "collector_cls": MoneycontrolRSSCollector,
+        "collector_cls": BaseRSSCollector,
     },
     {
         "name": "Economic Times Markets",
         "url": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
-        "collector_cls": EconomicTimesRSSCollector,
+        "collector_cls": BaseRSSCollector,
     },
     {
         "name": "LiveMint Markets",
         "url": "https://www.livemint.com/rss/markets",
-        "collector_cls": LiveMintRSSCollector,
+        "collector_cls": BaseRSSCollector,
     },
     {
         "name": "Business Standard Markets",
         "url": "https://www.business-standard.com/rss/markets-106.rss",
-        "collector_cls": BusinessStandardRSSCollector,
+        "collector_cls": BaseRSSCollector,
     },
     {
         "name": "CNBC TV18 Markets",
         "url": "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml",
-        "collector_cls": CNBCTV18RSSCollector,
+        "collector_cls": BaseRSSCollector,
     },
 ]
 
