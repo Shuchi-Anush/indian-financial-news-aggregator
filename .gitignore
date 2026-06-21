@@ -14,8 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-/lib/
-/lib64/
+
 parts/
 sdist/
 var/
@@ -239,10 +238,10 @@ exports/generated/
 exports/temp/
 
 # Docker volumes
-volumes/
-data/
-postgres_data/
-redis_data/
+/volumes/
+/data/
+/postgres_data/
+/redis_data/
 
 # Local AI / cache
 .cache/
@@ -255,8 +254,8 @@ redis_data/
 Desktop.ini
 
 # Temporary
-tmp/
-temp/
+/tmp/
+/temp/
 
 # OS temp
 *.tmp
@@ -282,7 +281,10 @@ pip-wheel-metadata/
 infra/**/tmp/
 infra/**/.cache/
 
-secrets
-passwords
-tokens
-research/
+/secrets/
+/passwords/
+/tokens/
+
+/research/archive/
+/research/tmp/
+/research/cache/
