@@ -1,5 +1,5 @@
 import asyncio
-import feedparser
+import feedparser  # type: ignore
 import httpx
 from datetime import datetime, timezone
 from dateutil import parser as date_parser

@@ -23,6 +23,7 @@ async def test_duplicate_insertions(repo: IngestionRepository, source_id: str):
     print("Testing duplicate insertions...")
     article = CanonicalArticle(
         title="Duplicate Test",
+        source_name="Example Source",
         url="https://example.com/dup1",
         source_id=source_id,
         content_hash="hash1",
@@ -48,6 +49,7 @@ async def test_concurrent_insertions(repo: IngestionRepository, source_id: str):
     articles = [
         CanonicalArticle(
             title=f"Concurrent Test {i}",
+            source_name="Example Source",
             url=f"https://example.com/conc{i}",
             source_id=source_id,
             content_hash=f"hash_conc_{i}",
@@ -108,6 +110,7 @@ async def test_transaction_rollback(source_id: str):
     try:
         article1 = CanonicalArticle(
             title="Valid Article",
+            source_name="Example Source",
             url="https://example.com/rollback_valid",
             source_id=source_id,
             content_hash="hash_r1",
