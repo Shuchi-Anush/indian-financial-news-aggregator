@@ -34,7 +34,7 @@ class PersistenceRepository(Protocol):
 
     async def get_active_sources(self) -> Sequence[dict]: ...
 
-    async def get_recent_candidates(self) -> Sequence[DedupCandidate]: ...
+    async def get_existing_candidates(self, urls: list[str], hashes: list[str]) -> Sequence[DedupCandidate]: ...
 
     async def save_articles(self, articles: Sequence[CanonicalArticle], source_id: str) -> int: ...
 
@@ -250,7 +250,14 @@ class IngestionPipeline:
                 log.error("failed_articles_persistence_failed", error=str(e))
 
         # 4. Deduplicate
-        existing_candidates = await self.repository.get_recent_candidates()
+        incoming_urls = [a.url for a in canonical_articles if a.url]
+        incoming_hashes = [a.content_hash for a in canonical_articles if a.content_hash]
+        
+        if incoming_urls or incoming_hashes:
+            existing_candidates = await self.repository.get_existing_candidates(incoming_urls, incoming_hashes)
+        else:
+            existing_candidates = []
+            
         deduplicator = Deduplicator(existing_candidates)
 
         unique_articles: list[CanonicalArticle] = []

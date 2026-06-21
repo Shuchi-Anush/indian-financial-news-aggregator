@@ -45,10 +45,21 @@ class IngestionRepository(PersistenceRepository):
                 for s in sources
             ]
 
-    async def get_recent_candidates(self) -> Sequence[DedupCandidate]:
-        """Fetch candidates to run deduplication against."""
+    async def get_existing_candidates(self, urls: list[str], hashes: list[str]) -> Sequence[DedupCandidate]:
+        """Fetch matching candidates to run deduplication against."""
+        if not urls and not hashes:
+            return []
+            
         async with self.session_factory() as session:
-            stmt = select(Article.url, Article.content_hash).limit(100000)
+            from sqlalchemy import or_
+            
+            conditions = []
+            if urls:
+                conditions.append(Article.url.in_(urls))
+            if hashes:
+                conditions.append(Article.content_hash.in_(hashes))
+                
+            stmt = select(Article.url, Article.content_hash).where(or_(*conditions))
             result = await session.execute(stmt)
             return [DedupCandidate(url=row.url, content_hash=row.content_hash) for row in result]
 
