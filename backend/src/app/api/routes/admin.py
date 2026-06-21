@@ -1,13 +1,23 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi.security import APIKeyHeader
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.failed_article import FailedArticle
 from app.models.feed_source import FeedSource
 from app.models.pipeline_run import PipelineRun
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+async def verify_admin_key(api_key: str = Security(api_key_header)):
+    settings = get_settings()
+    if api_key != settings.admin_api_key:
+        raise HTTPException(status_code=403, detail="Invalid API Key")
+    return api_key
+
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(verify_admin_key)])
 
 
 @router.get("/pipeline/status")

@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     newsdata_api_key: str | None = None
     gnews_api_key: str | None = None
 
+    # --- Security ---
+    admin_api_key: str = "dev_admin_key"
+
     # --- Computed properties ---
 
     @property
