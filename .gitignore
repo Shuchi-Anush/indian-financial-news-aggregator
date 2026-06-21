@@ -279,8 +279,8 @@ pip-wheel-metadata/
 
 # Future modules (not initialized yet)
 
-infra/*
-!infra/.gitkeep
+infra/**/tmp/
+infra/**/.cache/
 
 secrets
 passwords
