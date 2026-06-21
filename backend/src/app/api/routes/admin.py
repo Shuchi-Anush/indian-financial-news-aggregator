@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi import APIRouter, Depends, HTTPException, Security, BackgroundTasks
 from fastapi.security import APIKeyHeader
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,31 @@ async def get_pipeline_status(session: AsyncSession = Depends(get_db)):
     result = await session.execute(stmt)
     latest = result.scalar_one_or_none()
     return {"is_running": latest and latest.status.value == "running", "latest_run": latest}
+
+
+@router.post("/pipeline/trigger")
+async def trigger_pipeline(background_tasks: BackgroundTasks):
+    from app.orchestration.ingestion_jobs import run_ingestion_cycle
+    background_tasks.add_task(run_ingestion_cycle)
+    return {"status": "accepted", "message": "Ingestion cycle triggered in background"}
+
+
+@router.get("/dashboard/stats")
+async def get_dashboard_stats(session: AsyncSession = Depends(get_db)):
+    from sqlalchemy import text
+    total_articles = await session.scalar(text("SELECT count(*) FROM articles"))
+    total_sources = await session.scalar(text("SELECT count(*) FROM feed_sources WHERE is_active = true"))
+    articles_today = await session.scalar(text("SELECT count(*) FROM articles WHERE published_at >= CURRENT_DATE"))
+    
+    stmt = select(PipelineRun.started_at).where(PipelineRun.status == 'success').order_by(desc(PipelineRun.started_at)).limit(1)
+    last_run = await session.scalar(stmt)
+    
+    return {
+        "total_articles": total_articles or 0,
+        "active_sources": total_sources or 0,
+        "articles_today": articles_today or 0,
+        "last_ingestion": last_run.isoformat() if last_run else None,
+    }
 
 
 @router.get("/pipeline/runs")
