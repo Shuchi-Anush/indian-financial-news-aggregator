@@ -42,12 +42,14 @@ services:
 
   frontend:
     build:
-      context: ./frontend/streamlit
+      context: ./frontend/web
       dockerfile: Dockerfile
     container_name: finnews-frontend-prod
     restart: unless-stopped
     environment:
       - API_BASE_URL=http://backend:8000
+    ports:
+      - "3000:3000"
     depends_on:
       backend:
         condition: service_healthy
