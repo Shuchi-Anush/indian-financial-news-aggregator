@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white"/>
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white"/>
   <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square"/>
-  <img src="https://img.shields.io/badge/Release-v1.3.0--demo--validated-2ECC71?style=flat-square"/>
+  <img src="https://img.shields.io/badge/Release-v1.4.0--backend--stabilized-2ECC71?style=flat-square"/>
 </p>
 
 ---
@@ -161,11 +161,16 @@ Engineering claims are validated by operational audits located in the `docs/vali
 
 ## Roadmap
 
-**Current State (v1.3.0-demo-validated)**: The backend data ingestion architecture is structurally complete. Deduplication, persistence, and analytics generation are stable. Streamlit is active as a validation layer.
+**Current State (v1.4.0-backend-stabilized)**: The backend data ingestion architecture is structurally complete and production-hardened. 
+Recent stabilization efforts include:
+- **Global Advisory Locks**: Distributed concurrency control for multi-container ingestion.
+- **Batch Deduplication**: O(Batch Size) SQL batching resolving O(N) memory scaling risks.
+- **Admin Authentication**: Hardened protected routes using environment-driven API keys.
+- **Strict CI/CD Validation**: Automated test coverage mapping across normalizers, deduplication, and auth.
 
 **Near-Term**: 
-1. **Decoupled Orchestration**: Extracting `APScheduler` jobs into a distributed Celery/Redis queue to allow horizontal scaling of the ingestion tier.
-2. **Next.js Presentation Layer**: Replacing the Streamlit dashboard with a statically generated React application.
+1. **Next.js Presentation Layer**: Building a statically generated React application using Next.js 15, Tailwind, and App Router.
+2. **Decoupled Orchestration**: Extracting `APScheduler` jobs into a distributed Celery/Redis queue for horizontal scaling.
 
 **Long-Term**: 
 1. **ML Inference Pipeline**: Integrating asynchronous Named Entity Recognition (NER) models for automated entity tagging.
