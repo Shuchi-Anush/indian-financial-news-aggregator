@@ -72,16 +72,27 @@ async def run_ingestion_cycle():
     global _active_ingestion_task
 
     if _ingestion_lock.locked():
-        log.warning("ingestion_cycle_skipped_due_to_lock")
+        log.warning("ingestion_cycle_skipped_due_to_local_lock")
         return
 
     async with _ingestion_lock:
-        log.info("ingestion_cycle_started")
-        _active_ingestion_task = asyncio.current_task()
-        try:
-            await _run_pipeline()
-        finally:
-            _active_ingestion_task = None
+        session_factory = get_session_factory()
+        if not session_factory:
+            log.error("session_factory_not_initialized")
+            return
+            
+        repo = IngestionRepository(session_factory)
+        async with repo.global_advisory_lock("GLOBAL_INGESTION_PIPELINE") as locked:
+            if not locked:
+                log.warning("ingestion_cycle_skipped_due_to_global_lock")
+                return
+                
+            log.info("ingestion_cycle_started")
+            _active_ingestion_task = asyncio.current_task()
+            try:
+                await _run_pipeline()
+            finally:
+                _active_ingestion_task = None
 
 
 async def graceful_shutdown(timeout_seconds: float = 15.0):

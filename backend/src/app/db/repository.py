@@ -321,3 +321,24 @@ class IngestionRepository(PersistenceRepository):
                     stmt = text("SELECT pg_advisory_unlock(:id)")
                     await session.execute(stmt, {"id": lock_id})
                     await session.commit()
+
+    @asynccontextmanager
+    async def global_advisory_lock(self, lock_name: str) -> AsyncIterator[bool]:
+        """Acquire a global Postgres advisory lock to ensure single-pipeline execution across containers."""
+        import hashlib
+        from sqlalchemy import text
+
+        lock_id = int(hashlib.md5(lock_name.encode()).hexdigest()[:15], 16)
+
+        async with self.session_factory() as session:
+            locked = False
+            try:
+                stmt = text("SELECT pg_try_advisory_lock(:id)")
+                result = await session.execute(stmt, {"id": lock_id})
+                locked = result.scalar() is True
+                yield locked
+            finally:
+                if locked:
+                    stmt = text("SELECT pg_advisory_unlock(:id)")
+                    await session.execute(stmt, {"id": lock_id})
+                    await session.commit()
