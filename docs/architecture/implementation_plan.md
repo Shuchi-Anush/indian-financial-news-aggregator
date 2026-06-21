@@ -1,77 +1,133 @@
-# Phase 1: Repository & Implementation Audit
+# v1.4.0 Implementation Plan: Visibility & Stability Release
 
-Before executing modifications, a complete repository inspection was performed targeting `src/app/*`, `docker-compose.yml`, and the `frontend` directories to determine the actual delta between the "stabilized prototype" and a "production-grade platform."
+**Date:** 2026-06-21  
+**Author:** Technical Lead & Principal Architect  
 
-## 1. Implementation-Grounded Findings
-
-### Observability & Operations (Phase 3 Gaps)
-- **Fake Metrics Registry:** `src/app/core/metrics.py` dynamically queries PostgreSQL to generate text-based Prometheus metrics on the fly (e.g., `select func.count(PipelineRun.id)`). It defines a `NoOpRegistry` that silently discards real-time telemetry (like `registry.inc("normalization_errors_total")` seen in `pipeline.py`).
-- **Missing API Observability:** There is no middleware tracking API response latency (`http_request_duration_seconds`) or status codes.
-- **Weak Health Probes:** `src/app/main.py` exposes a generic `/health` returning `{"status": "ok"}`. It does not separate liveness (`/health/live`) from readiness (`/health/ready`), nor does it actively ping the database or check scheduler thread health.
-
-### Feed Ingestion Resilience (Phase 2 Gaps)
-- **Metrics Isolation:** `base_rss.py` uses `httpx` with retries, but because the metrics registry is `NoOpRegistry`, source-level success/failure counts and ingestion latency are completely lost in real-time.
-- **Missing Circuit Breaker Sync:** The database tracks `CircuitBreakerState`, but there's no real-time metrics emission for alerting when a source trips OPEN.
-- **HTML Sanitization:** `normalizer.py` uses `BeautifulSoup(text, "html.parser").get_text()`, which strips HTML but doesn't sanitize rich text if we ever want to display HTML safely on the frontend.
-
-### Long Duration Stability (Phase 4 Gaps)
-- **Unbounded Connection Pools:** `src/app/db/session.py` calls `create_async_engine` without explicit `pool_size`, `max_overflow`, or `pool_timeout`. Under concurrent ingestion and API load, this risks connection starvation.
-- **Non-Graceful Scheduler Shutdown:** `src/app/orchestration/scheduler.py` uses `scheduler.shutdown(wait=False)` during FastAPI's lifespan teardown. This forcefully orphans running ingestion tasks, risking partial DB writes and zombie `PipelineRun` records left in a `RUNNING` state indefinitely.
-- **No Ingestion Backpressure:** Concurrency is hardcoded via `DEFAULT_PIPELINE_CONCURRENCY` (Semaphore), but memory bounds for massive RSS XML parsing are not enforced.
-
-### Frontend & Deployment (Phase 5 & 6 Gaps)
-- **Missing UI:** `frontend/streamlit/` exists but is empty/unimplemented.
-- **Deployment Topology:** `docker-compose.yml` lacks an Nginx reverse proxy layer, production environment handling, and centralized volume/logging definitions.
+This document outlines the exact execution path for v1.4.0. It prioritizes backend stabilization (eliminating P0 scalability blockers) and the introduction of a Next.js frontend to transform the headless backend into a demonstrable product.
 
 ---
 
-## User Review Required
+## PART 1 — SPRINT STRUCTURE
 
-> [!WARNING]
-> **Metrics Override:** I will replace the DB-query-based metrics in `metrics.py` with true `prometheus_client` memory registries. This means historical totals will drop from the `/metrics` endpoint unless backfilled, but real-time latency and throughput will become accurate.
-> 
-> **Shutdown Blocking:** Fixing the scheduler teardown will cause the FastAPI container to wait up to 15 seconds during shutdown to gracefully terminate ingestion jobs. 
-> 
-> **Do you approve of these strict operational overrides before I begin execution?**
+### Week 1: Backend Stabilization & CI/CD
+| Task | Priority | Dependencies | Effort | Risk | Expected Outcome |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **A. Remove Legacy Collectors** | High | None | Low | Low | Clean `collectors/rss/` directory containing only `base_rss.py`. |
+| **B. Deduplication Refactor** | P0 | None | High | Medium | Eliminates `LIMIT 100000` OOM risk. Idempotency preserved. |
+| **C. Advisory Lock Integration**| P0 | None | Medium| Medium | Prevents multi-node ingestion duplication. |
+| **D. Admin Authentication** | P1 | None | Low | Low | API key protection for `/admin` routes. |
+| **E. Test Coverage Expansion** | P1 | None | Medium| Low | Tests for core pure functions and DB pipelines. |
+| **F. GitHub Actions CI** | P1 | Tasks A-E | Low | Low | Automated Ruff, Pytest, and Docker build checks. |
+
+### Week 2: Next.js Frontend
+| Task | Priority | Dependencies | Effort | Risk | Expected Outcome |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **G. Next.js Scaffolding** | High | None | Low | Low | App Router, Tailwind, TS configured. |
+| **H. API Client & Types** | High | None | Low | Low | Fetch/Axios layer mapping to FastAPI contracts. |
+| **I. Dashboard (/)** | High | Task H | High | Low | High-density chronological feed. |
+| **J. Search Hub (/search)** | High | Task H | Medium| Low | GIN-backed full-text search and filters. |
+| **K. Regulatory Desk** | High | Task H | Medium| Low | Distinct UI for SEBI/RBI policy updates. |
+| **L. Admin Health Panel** | Med | Task D, H | Low | Low | Read-only pipeline metrics view. |
+| **M. Readme Upgrade** | High | Tasks A-L | Low | Low | Recruiter-optimized repository documentation. |
 
 ---
 
-## Execution Plan (Phases 2-7)
+## PART 2 — BACKEND STABILIZATION
 
-### Phase 2 — Feed Ingestion Hardening
-#### [MODIFY] `src/app/collectors/rss/base_rss.py`
-- Enhance `feedparser` error handling and enforce strict timeouts per feed.
-- Wire actual Prometheus metrics for latency and payload sizes.
+### Task A — Remove Legacy Collectors
+- **Analysis:** I ran `grep_search` across `backend/src`. The classes (`LiveMintRSSCollector`, `SebiRSSCollector`, etc.) are entirely unreferenced. The orchestrator uses `BaseRSSCollector`. 
+- **Deletion Plan:** `rm backend/src/app/collectors/rss/{sebi,livemint,moneycontrol,economictimes,businessstandard,cnbctv18}.py`.
+- **Validation:** Run `pytest` and `uvicorn` to verify no import errors.
 
-### Phase 3 — Observability & Operations
-#### [MODIFY] `src/app/core/metrics.py`
-- Strip `NoOpRegistry` and DB-querying logic. Implement `prometheus_client`.
-#### [MODIFY] `src/app/core/middleware.py` (New/Modify)
-- Add Prometheus request latency timing middleware.
-#### [MODIFY] `src/app/main.py`
-- Implement `/health/live` (process check) and `/health/ready` (DB ping via `get_engine().execute(text("SELECT 1"))`).
+### Task B — Deduplication Refactor
+- **Current implementation:** `repository.py` fetches 100k URLs and hashes into memory.
+- **Design (Batch Database Lookup):**
+  1. `Deduplicator` class is updated to be stateless.
+  2. `pipeline.py` extracts a list of `content_hash` and `url` from the current batch of `CanonicalArticle`s.
+  3. `repo.get_existing_hashes_and_urls(hashes, urls)` queries PostgreSQL: `SELECT url, content_hash FROM articles WHERE content_hash = ANY(:hashes) OR url = ANY(:urls)`.
+  4. The returned set is passed to `Deduplicator.check_duplicate()`.
+- **Outcome:** Eliminates O(N) memory scaling while preserving exact idempotency.
 
-### Phase 4 — Long Duration Stability
-#### [MODIFY] `src/app/db/session.py`
-- Apply `pool_size=20`, `max_overflow=10`, `pool_timeout=30`, `pool_recycle=1800` to `create_async_engine`.
-#### [MODIFY] `src/app/orchestration/scheduler.py` & `src/app/core/startup.py`
-- Implement a graceful shutdown loop that waits for `_ingestion_lock` to clear before terminating.
+### Task C — Advisory Lock Integration
+- **Current implementation:** `ingestion_jobs.py` uses `asyncio.Lock()` (process-local).
+- **Design:**
+  1. Add a globally stable key: `GLOBAL_INGESTION_LOCK_ID = 1001`.
+  2. Wrap `_run_pipeline()` with `async with repo.global_advisory_lock(GLOBAL_INGESTION_LOCK_ID):`.
+  3. If lock acquisition fails, the scheduler safely skips the cycle (meaning another node is running it).
+- **Outcome:** Safe for multiple Docker replicas.
 
-### Phase 5 — Frontend Implementation
-#### [NEW] `frontend/streamlit/app.py` & `frontend/streamlit/requirements.txt`
-- Build a multi-page Streamlit dashboard (Dashboard, Article Explorer, Source Health).
-- Fetch data exclusively via the FastAPI `httpx` client.
+### Task D — Admin Authentication
+- **Design:**
+  1. Add `ADMIN_API_KEY` to `Settings`.
+  2. Create `def verify_admin_key(x_api_key: str = Security(api_key_header))` in `api/dependencies.py`.
+  3. Inject `Depends(verify_admin_key)` into the `admin.py` router.
 
-### Phase 6 — Deployment & Hosting
-#### [NEW] `infra/nginx/nginx.conf`
-#### [NEW] `docker-compose.prod.yml`
-- Define Nginx reverse proxy routing `/api` to backend and `/` to Streamlit.
+### Task E — Test Coverage Expansion
+- **Test Matrix:**
+  - `test_normalizer.py`: Assert HTML stripping, date parsing logic.
+  - `test_hashing.py`: Assert deterministic SHA-256 output.
+  - `test_deduplicator.py`: Assert exact hash/URL match logic.
 
-### Phase 7 — Final Production Readiness Audit
-- Generate a conclusive `artifacts/production_audit_report.md` classifying architectural limits, scaling boundaries, and future migration paths.
+---
 
-## Verification Plan
-After every phase:
-1. Run `uv sync --frozen`, `uv lock --check`, `uv run ruff check src tests`, `uv run mypy src`, `uv run pytest -q`.
-2. Spin up `docker compose up --build -d`.
-3. Validate `/health/ready` and `/metrics`.
+## PART 3 — GITHUB ACTIONS
+
+- **Workflow File:** `.github/workflows/ci.yml`
+- **Job Sequence:**
+  1. **Lint:** `uv run ruff check .` and `uv run ruff format --check .`
+  2. **Test:** `uv run pytest --cov=app` (Requires a running Postgres service container in Actions).
+  3. **Build:** `docker build -t finnews-backend:test backend/`
+- **Caching Strategy:** Utilize `actions/setup-python` caching and Docker layer caching.
+
+---
+
+## PART 4 — NEXT.JS FRONTEND
+
+**Target:** Next.js 15, TypeScript, Tailwind CSS, App Router.
+**Vibe:** Professional financial intelligence terminal (Bloomberg-lite). High density, dark mode default.
+
+### Required Pages
+- `/` (Dashboard): Latest news feed, Source Badges, pagination controls.
+- `/search` (Search Hub): Debounced full-text search, Source dropdown filters, Date pickers.
+- `/regulatory` (Regulatory Desk): A feed locked to SEBI/RBI sources. Articles here use an Amber/Gold visual highlight.
+- `/admin/health` (Pipeline Monitoring): Uses the new `ADMIN_API_KEY` to fetch and render system health graphs.
+
+---
+
+## PART 5 — API CONTRACT VALIDATION
+
+**Backend Endpoint → Frontend Consumer Mapping:**
+- `GET /articles` → Dashboard (`/`), Search (`/search`), Regulatory (`/regulatory` with `source=sebi`).
+- `GET /articles/export/csv` → Export Button on all feeds.
+- `GET /admin/pipeline/status` → Admin Health panel.
+- `GET /admin/sources/health` → Admin Health panel.
+
+**Validation:** The existing APIs perfectly cover the required UI functionality. Zero new backend endpoints are needed. 
+
+---
+
+## PART 6 — README UPGRADE
+
+**Structure (Optimized for Recruiters & Professors):**
+1. **Hero Header:** Project Name, Badges (CI Passing, Coverage 90%), high-quality screenshot of the Next.js UI.
+2. **One-Sentence Pitch:** "A production-grade, zero-code RSS aggregation platform built with FastAPI and Next.js."
+3. **Architecture Diagram:** Mermaid.js flowchart showing Scheduler → Normalizer → DB → FastAPI → Next.js.
+4. **Core Features:** Emphasize "Circuit Breakers", "Idempotency", and "Advisory Locks".
+5. **Quick Start:** 3 commands to run via Docker Compose.
+6. **Technology Stack:** Clear list of tools and versions.
+
+---
+
+## PART 7 — FINAL OUTPUT
+
+1. **Official v1.4.0 Scope:** Backend Stabilization + Next.js UI + CI/CD.
+2. **Official v1.4.0 Architecture:** Headless FastAPI connected to Postgres, consumed by Next.js 15 App Router Server Components.
+3. **Risks:** The database deduplication refactor (Task B) touches core ingestion logic and could temporarily break idempotency if the SQL `IN` clause misses hashes. Strict unit tests (Task E) mitigate this.
+4. **Success Criteria:** 
+   - A recruiter can visit a URL and immediately interact with the data.
+   - The backend survives 2 concurrent Docker replicas without duplicate RSS fetching.
+   - GitHub Actions shows green.
+
+### FINAL VERDICT: GO 🟢
+
+I approve the v1.4.0 implementation plan. We are ready to execute Week 1 (Backend Stabilization) immediately.
