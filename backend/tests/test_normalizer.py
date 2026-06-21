@@ -1,5 +1,3 @@
-import pytest
-from datetime import datetime, timezone
 from app.domain.articles import RawArticle
 from app.processors.normalizer import ArticleNormalizer, compute_content_hash
 

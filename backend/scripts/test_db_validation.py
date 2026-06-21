@@ -15,9 +15,8 @@ load_environment()
 
 from app.db.session import get_session_factory, initialize_database, dispose_engine
 from app.db.repository import IngestionRepository
-from app.domain.articles import CanonicalArticle, RawArticle
+from app.domain.articles import CanonicalArticle
 from app.models.feed_source import FeedSource
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, insert, delete
 
 async def test_duplicate_insertions(repo: IngestionRepository, source_id: str):

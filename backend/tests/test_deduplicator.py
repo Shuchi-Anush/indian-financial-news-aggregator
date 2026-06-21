@@ -1,4 +1,3 @@
-import pytest
 from app.domain.articles import CanonicalArticle
 from app.domain.deduplication import DedupCandidate
 from app.processors.deduplicator import Deduplicator
