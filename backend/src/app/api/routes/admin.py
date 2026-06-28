@@ -42,7 +42,12 @@ async def get_dashboard_stats(session: AsyncSession = Depends(get_db)):
     total_sources = await session.scalar(text("SELECT count(*) FROM feed_sources WHERE is_active = true"))
     articles_today = await session.scalar(text("SELECT count(*) FROM articles WHERE published_at >= CURRENT_DATE"))
     
-    stmt = select(PipelineRun.started_at).where(PipelineRun.status == 'success').order_by(desc(PipelineRun.started_at)).limit(1)
+    stmt = (
+        select(PipelineRun.started_at)
+        .where(PipelineRun.status.in_(['SUCCESS', 'PARTIAL_SUCCESS']))
+        .order_by(desc(PipelineRun.started_at))
+        .limit(1)
+    )
     last_run = await session.scalar(stmt)
     
     return {
